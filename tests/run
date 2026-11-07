@@ -83,6 +83,11 @@ if grep -q ' @\.starling/AGENTS\.md$' "$root/AGENTS.md"; then ok; else
 	bad "instructions: import line" "AGENTS.md needs a line ending in ' @.starling/AGENTS.md'"
 fi
 
+# Starling uses its own Claude Code settings, as the installer writes them.
+if cmp -s "$root/.claude/settings.json" "$root/.starling/claude-settings.json"; then ok; else
+	bad "settings: .claude/settings.json" "differs from .starling/claude-settings.json"
+fi
+
 # Starling uses its own skills, linked as the installer links them.
 for skill in "$root"/.starling/skills/*/; do
 	name=$(basename "$skill")
