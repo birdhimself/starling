@@ -11,5 +11,5 @@ question is answered, update those files in the same change. They are private
 and must never be copied into this repository.
 
 - `.starling/` is the payload: exactly what a repository receives on install.
-- Scripts use only POSIX `sh`, POSIX `awk` and git.
+- Scripts use only POSIX `sh`, POSIX `awk` and git, and no temporary files.
 - Run the tests with `sh tests/run`.
