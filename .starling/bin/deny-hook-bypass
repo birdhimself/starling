@@ -1,0 +1,228 @@
+#!/bin/sh
+# Starling: stop agents from bypassing or switching off git hooks.
+#
+#   deny-hook-bypass < hook-input.json
+#
+# A Claude Code PreToolUse hook for the Bash tool. It reads the hook input
+# (JSON) on standard input, takes tool_input.command and checks every git
+# command in it. It blocks:
+#   - --no-verify on any git command, and git commit -n (also inside -anm)
+#   - git -c or --config-env overrides of core.hooksPath or hook.*
+#   - GIT_CONFIG_PARAMETERS or GIT_CONFIG_COUNT set in front of git
+#   - git config changes to core.hooksPath or hook.*; core.hooksPath may
+#     only be set to .starling/hooks
+# It splits the command as a shell does (quotes, escapes, heredocs,
+# $(...), ;, &&, ||, |), so a commit message that mentions --no-verify or
+# -n passes.
+#
+# Exit status: 0 allow, 2 block, with the reason on standard error, which
+# Claude Code shows the model. Input it cannot read is allowed: CI checks
+# every commit anyway.
+
+set -u
+
+program='
+BEGIN { RS = "\001" }
+{ input = input $0 }
+END {
+	cmd = command_of(input)
+	if (cmd != "") { r = scan(cmd); if (r != "") print r }
+}
+
+function hexval(h,   i, v) {
+	v = 0; h = tolower(h)
+	for (i = 1; i <= length(h); i++) v = v * 16 + index("0123456789abcdef", substr(h, i, 1)) - 1
+	return v
+}
+
+# The decoded value of the first "command" key, or "" without one.
+function command_of(s,   rest, out, c, e, v) {
+	if (!match(s, /[{,][ \t\r\n]*"command"[ \t\r\n]*:[ \t\r\n]*"/)) return ""
+	rest = substr(s, RSTART + RLENGTH); out = ""
+	while (match(rest, /[\\"]/)) {
+		out = out substr(rest, 1, RSTART - 1)
+		if (substr(rest, RSTART, 1) == "\"") return out
+		e = substr(rest, RSTART + 1, 1)
+		if (e == "u") {
+			v = hexval(substr(rest, RSTART + 2, 4))
+			out = out (v == 10 ? "\n" : v > 31 && v < 127 ? sprintf("%c", v) : " ")
+			rest = substr(rest, RSTART + 6); continue
+		}
+		out = out (e == "n" ? "\n" : e == "t" ? "\t" : e ~ /[rbf]/ ? " " : e)
+		rest = substr(rest, RSTART + 2)
+	}
+	return ""
+}
+
+# heredoc(s, i): read the delimiter of a heredoc at i, just after "<<".
+# Sets hd to the delimiter and returns the index after it.
+function heredoc(s, i,   c) {
+	if (substr(s, i, 1) == "-") i++
+	while (substr(s, i, 1) ~ /[ \t]/) i++
+	hd = ""
+	while (i <= length(s) && (c = substr(s, i, 1)) !~ /[ \t\n;&|<>()]/) {
+		if (c !~ /[\\"\047]/) hd = hd c
+		i++
+	}
+	return i
+}
+
+# skip_body(s, i, d): skip heredoc lines from i through the line d.
+function skip_body(s, i, d,   j, line) {
+	while (i <= length(s)) {
+		j = index(substr(s, i), "\n")
+		line = j ? substr(s, i, j - 1) : substr(s, i)
+		i += j ? j : length(s) - i + 2
+		sub(/^\t+/, "", line)
+		if (line == d) break
+	}
+	return i
+}
+
+# skip_subst(s, i): i is at "$(". Returns the index after the matching ")",
+# skipping quotes and heredocs inside.
+function skip_subst(s, i,   depth, c, j, d) {
+	depth = 1; i += 2
+	while (i <= length(s)) {
+		c = substr(s, i, 1)
+		if (c == "\047") { j = index(substr(s, i + 1), "\047"); i += j ? j + 1 : length(s); continue }
+		if (c == "\"") {
+			i++
+			while (i <= length(s) && (c = substr(s, i, 1)) != "\"") i += (c == "\\" ? 2 : 1)
+			i++; continue
+		}
+		if (c == "\\") { i += 2; continue }
+		if (substr(s, i, 2) == "<<" && substr(s, i, 3) != "<<<") {
+			i = heredoc(s, i + 2); d = hd
+			j = index(substr(s, i), "\n")
+			if (!j) return length(s) + 1
+			i = skip_body(s, i + j, d); continue
+		}
+		if (c == "(") depth++
+		if (c == ")" && --depth == 0) return i + 1
+		i++
+	}
+	return i
+}
+
+function addword() {
+	if (inword) { if (skipnext) skipnext = 0; else w[++nw] = word }
+	word = ""; inword = 0
+}
+
+# Split the command line into simple commands and check each one. Returns
+# the reason to block, or "".
+function scan(s,   n, i, c, nx, j, r, k, nd, delims) {
+	n = length(s); i = 1; nw = 0; word = ""; inword = 0; skipnext = 0; nd = 0
+	while (i <= n) {
+		c = substr(s, i, 1)
+		if (c == "\047") {
+			j = index(substr(s, i + 1), "\047"); if (!j) j = n - i + 1
+			word = word substr(s, i + 1, j - 1); inword = 1; i += j + 1; continue
+		}
+		if (c == "\"") {
+			i++; inword = 1
+			while (i <= n && (c = substr(s, i, 1)) != "\"") {
+				if (c == "\\") { nx = substr(s, i + 1, 1); if (nx != "\n") word = word nx; i += 2; continue }
+				if (substr(s, i, 2) == "$(") { word = word "$(...)"; i = skip_subst(s, i); continue }
+				word = word c; i++
+			}
+			i++; continue
+		}
+		if (c == "\\") { nx = substr(s, i + 1, 1); if (nx != "\n") { word = word nx; inword = 1 } i += 2; continue }
+		if (substr(s, i, 2) == "$(") { word = word "$(...)"; inword = 1; i = skip_subst(s, i); continue }
+		if (c == " " || c == "\t") { addword(); i++; continue }
+		if (c == "#" && !inword) { while (i <= n && substr(s, i, 1) != "\n") i++; continue }
+		if (substr(s, i, 2) == "<<" && substr(s, i, 3) != "<<<") {
+			addword(); i = heredoc(s, i + 2); delims[++nd] = hd; continue
+		}
+		if (c == "<" || c == ">") {
+			if (word ~ /^[0-9]+$/) { word = ""; inword = 0 }
+			addword(); while (substr(s, i, 1) ~ /[<>&|]/) i++
+			skipnext = 1; continue
+		}
+		if (c ~ /[\n;&|()]/) {
+			addword(); r = check(); if (r != "") return r
+			nw = 0; skipnext = 0; i++
+			if (c == "\n") { for (k = 1; k <= nd; k++) i = skip_body(s, i, delims[k]); nd = 0 }
+			continue
+		}
+		word = word c; inword = 1; i++
+	}
+	addword()
+	return check()
+}
+
+# hookkey(kv): kv is "name=value" or "name"; true when name changes hooks.
+function hookkey(kv,   name) {
+	name = tolower(kv); sub(/=.*/, "", name)
+	return name == "core.hookspath" || name ~ /^hook\./
+}
+
+# Check the simple command in w[1..nw]. Returns the reason to block, or "".
+function check(   k, envcfg, name, o, sc, j, a, p, ch, pos, np, sub_, write, value) {
+	k = 1; envcfg = 0
+	while (k <= nw) {
+		if (w[k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { if (w[k] ~ /^GIT_CONFIG_(PARAMETERS|COUNT)=/) envcfg = 1; k++; continue }
+		if (w[k] ~ /^(env|command|exec|nohup|time)$/) { k++; continue }
+		break
+	}
+	if (k > nw) return ""
+	name = w[k]; sub(/.*\//, "", name)
+	if (name != "git") return ""
+	if (envcfg) return "GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT can switch git hooks off"
+	for (k++; k <= nw && w[k] ~ /^-/; k++) {
+		o = w[k]
+		if (o == "-c" || o == "--config-env") {
+			if (hookkey(w[k + 1])) return "git " o " " w[k + 1] " changes git hooks for one command"
+			k++
+		} else if (o ~ /^--config-env=/) {
+			if (hookkey(substr(o, 14))) return "git " o " changes git hooks for one command"
+		} else if (o ~ /^(-C|--git-dir|--work-tree|--namespace|--super-prefix|--attr-source)$/) k++
+	}
+	if (k > nw) return ""
+	sc = w[k++]
+	for (j = k; j <= nw && w[j] != "--"; j++)
+		if (w[j] == "--no-verify") return "--no-verify skips git hooks"
+
+	if (sc == "commit") {
+		for (j = k; j <= nw && w[j] != "--"; j++) {
+			a = w[j]
+			if (a ~ /^--(message|file|reuse-message|reedit-message|template|author|date|cleanup|fixup|squash|trailer|pathspec-from-file)$/) { j++; continue }
+			if (a !~ /^-[^-]/) continue
+			for (p = 2; p <= length(a); p++) {
+				ch = substr(a, p, 1)
+				if (ch == "n") return "git commit -n skips git hooks"
+				if (index("mFCctuS", ch)) { if (p == length(a) && index("mFCct", ch)) j++; break }
+			}
+		}
+	}
+
+	if (sc == "config") {
+		np = 0; write = 0; sub_ = ""
+		for (j = k; j <= nw; j++) {
+			a = w[j]
+			if (a ~ /^--(unset|unset-all|replace-all|add|remove-section|rename-section)$/) write = 1
+			else if (a ~ /^(-f|--file|--blob|--type|--default|--comment|--value)$/) j++
+			else if (a !~ /^-/) pos[++np] = a
+		}
+		if (np && pos[1] ~ /^(set|unset|get|list|edit|rename-section|remove-section)$/) {
+			sub_ = pos[1]; if (sub_ !~ /^(get|list|edit)$/) write = 1
+			for (j = 1; j < np; j++) pos[j] = pos[j + 1]
+			np--
+		}
+		if (np >= 2 && sub_ == "") write = 1
+		if (write && np && hookkey(pos[1])) {
+			value = np >= 2 ? pos[2] : ""
+			if (tolower(pos[1]) != "core.hookspath" || value != ".starling/hooks" || sub_ == "unset") return "git config " pos[1] " changes how git runs hooks"
+		}
+	}
+	return ""
+}
+'
+
+reason=$(LC_ALL=C awk "$program") || exit 0
+[ -n "$reason" ] || exit 0
+printf 'Blocked by Starling: %s.\n%s\n' "$reason" \
+	"Git hooks check this repository's rules: fix what a hook reports instead of getting around it, and if a hook itself is wrong, tell the maintainer." >&2
+exit 2
