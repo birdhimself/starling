@@ -80,6 +80,44 @@ expect "$other" "scopes: listed on separate lines" 1 "this repository allows: se
 printf '[commit\n\tscopes = server\n' >"$other/.starling.conf"
 expect "$other" "scopes: unreadable .starling.conf" 2 "cannot read" "$check" "$msgs/valid-full.msg"
 
+# The commit-changes context script, in a clone whose branch has a pushed and
+# a local commit.
+context="$root/.starling/skills/commit-changes/scripts/context"
+work=$tmp/work
+{
+	git init -q --bare "$tmp/origin.git" &&
+		git init -q -b main "$work" &&
+		git -C "$work" config user.name Test &&
+		git -C "$work" config user.email test@example.com &&
+		git -C "$work" commit -q --allow-empty -F "$msgs/valid-full.msg" &&
+		git -C "$work" remote add origin "$tmp/origin.git" &&
+		git -C "$work" push -q -u origin main 2>/dev/null &&
+		git -C "$work" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main &&
+		git -C "$work" checkout -q -b topic &&
+		git -C "$work" commit -q --allow-empty -F "$msgs/valid-breaking.msg" &&
+		git -C "$work" push -q -u origin topic 2>/dev/null &&
+		git -C "$work" commit -q --allow-empty -F "$msgs/valid-url-line.msg" &&
+		echo change >"$work/new-file" &&
+		mkdir "$work/sub"
+} || exit 2
+
+expect "$work" "context: no scopes" 0 "Scopes: none, so headers take no scope" "$context"
+expect "$work" "context: branch" 0 "Branch: topic, pushed to origin/topic" "$context"
+expect "$work" "context: base" 0 "Base: origin/main, forked at" "$context"
+expect "$work" "context: pushed commit" 0 " pushed feat(api)!: drop the v1 widget endpoints" "$context"
+expect "$work" "context: local commit" 0 " local  docs: link the upstream issue" "$context"
+expect "$work" "context: changes" 0 "?? new-file" "$context"
+expect "$work/sub" "context: from a subdirectory" 0 "Branch: topic" "$context"
+printf '[commit]\n\tscopes = api\n\tscopes = ui\n' >"$work/.starling.conf"
+expect "$work" "context: scopes" 0 "Scopes: api ui" "$context"
+git -C "$work" rev-parse HEAD >"$work/.git/MERGE_HEAD"
+expect "$work" "context: merge in progress" 0 "In progress: a merge" "$context"
+rm "$work/.git/MERGE_HEAD"
+expect "$other" "context: no commits yet" 2 "cannot read .starling.conf" "$context"
+rm "$other/.starling.conf"
+expect "$other" "context: no commits yet" 0 "Commits: none yet" "$context"
+expect "$tmp" "context: outside a repository" 2 "not inside a git work tree" "$context"
+
 # Ranges, checked as CI checks them.
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-full.msg" || exit 2
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-breaking.msg" || exit 2
