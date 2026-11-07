@@ -76,6 +76,23 @@ missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
 done)
 if [ -z "$missing" ]; then ok; else bad "instructions: named paths exist" "$missing"; fi
 
+# Claude Code resolves an @ import only where the path ends the line or is
+# followed by a space: in "@.starling/AGENTS.md." the period becomes part of
+# the path.
+if grep -q ' @\.starling/AGENTS\.md$' "$root/AGENTS.md"; then ok; else
+	bad "instructions: import line" "AGENTS.md needs a line ending in ' @.starling/AGENTS.md'"
+fi
+
+# Starling uses its own skills, linked as the installer links them.
+for skill in "$root"/.starling/skills/*/; do
+	name=$(basename "$skill")
+	for dir in .claude/skills .agents/skills; do
+		if [ "$(cd "$root/$dir/$name" 2>/dev/null && pwd -P)" = "$(cd "$skill" && pwd -P)" ]; then ok; else
+			bad "skills: $dir/$name" "expected a link to ../../.starling/skills/$name"
+		fi
+	done
+done
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then
