@@ -1,0 +1,64 @@
+schema_version: "1.1"
+name: commit-changes-own-change
+description: >-
+  When the agent wrote the change itself, the commit names it in a Co-authored-by trailer with the exact casing.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    A group with one widget is labeled "1 widgets". Fix that in lib/label.js, then commit the fix.
+  max_turns: 40
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: runs-the-checker
+    type: tool_used
+    tool: Bash
+    input_match: check-commit-msg
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: one-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit'
+    match: count:1
+  - name: a-fix-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: fix: '
+  - name: last-message-has-a-body
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]+\n\n[^\n#]'
+  - name: last-message-wrapped-at-72
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]{73,}$'
+    flags: m
+    match: not_contains
+  - name: last-message-trailer-rules
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: 'Co-Authored-By|Claude-Session'
+    match: not_contains
+  - name: co-authored-by
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^Co-authored-by: Claude [^<>\n]+ <noreply@anthropic\.com>$'
+    flags: m

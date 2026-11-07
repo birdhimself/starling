@@ -1,0 +1,5 @@
+{
+  "name": "starling",
+  "description": "Starling's shared skills, loaded as a plugin only to run their evals.",
+  "skills": "./.starling/skills"
+}

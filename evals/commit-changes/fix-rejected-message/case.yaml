@@ -1,0 +1,43 @@
+schema_version: "1.1"
+name: commit-changes-fix-rejected-message
+description: >-
+  The unpushed last commit's rejected message is rewritten into a feat message.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    The commit check rejected the message of the last commit on this branch. Fix it.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: runs-the-checker
+    type: tool_used
+    tool: Bash
+    input_match: check-commit-msg
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: rewrites-the-message
+    type: tool_used
+    tool: Bash
+    input_match: --amend|amend!
+  - name: message-rewritten
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\t(commit \(amend\)|rebase \(fixup\)): feat'
