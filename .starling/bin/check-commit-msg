@@ -148,19 +148,19 @@ END {
 	exit errors > 0
 }'
 
-# check FILE [REJECT_FIXUPS]: print the problems with one cleaned message.
+# check MESSAGE [REJECT_FIXUPS]: print the problems with one cleaned message.
+# Messages travel in variables and pipes, never temporary files: sandboxes
+# often refuse writes to the system's temporary directory.
 check() {
-	trailers=$(git interpret-trailers --parse <"$1" | grep -c .)
-	LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" -v scopes="$scopes" "$rules" "$1"
+	trailers=$(printf '%s\n' "$1" | git interpret-trailers --parse | grep -c .)
+	printf '%s\n' "$1" |
+		LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" -v scopes="$scopes" "$rules"
 }
-
-tmp=$(mktemp) || exit 2
-trap 'rm -f "$tmp"' EXIT
 
 if [ "${1:-}" != "--range" ]; then
 	[ $# -eq 1 ] && [ -f "$1" ] || usage
-	awk '/^# -+ >8 -+$/ { exit } { print }' "$1" | git stripspace --strip-comments >"$tmp"
-	if out=$(check "$tmp"); then exit 0; fi
+	msg=$(awk '/^# -+ >8 -+$/ { exit } { print }' "$1" | git stripspace --strip-comments)
+	if out=$(check "$msg"); then exit 0; fi
 	printf '%s\n%s\n\n%s\n' "The commit message breaks the commit conventions:" "$out" "$hint" >&2
 	exit 1
 fi
@@ -190,8 +190,7 @@ if [ "$reject_merges" = 1 ] && [ -n "$(git rev-list --merges "$range")" ]; then
 	failed=1
 fi
 for sha in $(git rev-list --no-merges --reverse "$range"); do
-	git log -1 --format=%B "$sha" >"$tmp"
-	if ! out=$(check "$tmp" "$reject_fixups"); then
+	if ! out=$(check "$(git log -1 --format=%B "$sha")" "$reject_fixups"); then
 		printf '%s\n%s\n\n' "$(git log -1 --format='%h %s' "$sha")" "$out" >&2
 		failed=1
 	fi
