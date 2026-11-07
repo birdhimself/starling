@@ -1,0 +1,36 @@
+#!/bin/sh
+# Starling: activate Starling's git hooks in this clone.
+#
+#   activate-hooks
+#
+# core.hooksPath is local git configuration, so every clone needs this once.
+# Claude Code runs it at the start of each session; people run it after
+# cloning. It sets core.hooksPath to .starling/hooks when it is unset or
+# already that, and says nothing.
+#
+# When something else set core.hooksPath, such as husky, it changes nothing:
+# that tool would set it back. It prints a note instead, on standard output
+# so that Claude Code passes it to the model, and exits 1.
+#
+# Exit status: 0 hooks active, 1 another hooks path is set, 2 not in a
+# repository with Starling installed.
+
+set -u
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 2
+[ -d "$top/.starling/hooks" ] || exit 2
+
+current=$(git -C "$top" config --get core.hooksPath)
+case $current in
+'' | .starling/hooks) ;;
+*)
+	cat <<EOF
+Starling's git hooks are not active in this clone: core.hooksPath is
+$current, set by another tool such as husky. Commit messages are only
+checked in CI until this is fixed. To fix it, move this repository's own
+hooks to .githooks/<name>, which Starling's hooks run, remove the tool that
+set core.hooksPath, and run .starling/bin/activate-hooks again.
+EOF
+	exit 1
+	;;
+esac
+[ -n "$current" ] || git -C "$top" config core.hooksPath .starling/hooks

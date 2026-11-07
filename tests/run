@@ -149,6 +149,23 @@ rm "$other/.starling.conf"
 expect "$other" "context: no commits yet" 0 "Commits: none yet" "$context"
 expect "$tmp" "context: outside a repository" 2 "not inside a git work tree" "$context"
 
+# Activation sets core.hooksPath, unless another tool set it.
+act="$root/.starling/bin/activate-hooks"
+mkdir -p "$tmp/act/.starling/hooks" && git init -q "$tmp/act" || exit 2
+expect "$tmp/act" "activate: sets the hooks path" 0 "" "$act"
+if [ "$(git -C "$tmp/act" config core.hooksPath)" = .starling/hooks ]; then ok; else
+	bad "activate: hooks path" "core.hooksPath is '$(git -C "$tmp/act" config core.hooksPath)'"
+fi
+out=$(cd "$tmp/act" && run "$act" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "activate: quiet when active" "got: $out"; fi
+git -C "$tmp/act" config core.hooksPath .husky/_
+expect "$tmp/act" "activate: leaves another hooks path" 1 "core.hooksPath is
+.husky/_" "$act"
+if [ "$(git -C "$tmp/act" config core.hooksPath)" = .husky/_ ]; then ok; else
+	bad "activate: other path unchanged" "core.hooksPath is '$(git -C "$tmp/act" config core.hooksPath)'"
+fi
+expect "$tmp/repo" "activate: without Starling" 2 "" "$act"
+
 # Starling's hooks run the repository's own hooks in .githooks/.
 for h in pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit \
 	pre-rebase post-checkout post-merge post-rewrite pre-push; do
