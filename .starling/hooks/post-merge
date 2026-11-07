@@ -1,0 +1,3 @@
+#!/bin/sh
+# Starling: run the repository's own hook of this name in .githooks/, if any.
+exec "$(dirname -- "$0")/../bin/run-project-hook" "$(basename -- "$0")" "$@"
