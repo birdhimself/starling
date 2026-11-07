@@ -149,6 +149,42 @@ rm "$other/.starling.conf"
 expect "$other" "context: no commits yet" 0 "Commits: none yet" "$context"
 expect "$tmp" "context: outside a repository" 2 "not inside a git work tree" "$context"
 
+# The Claude Code hook that blocks hook bypasses. tests/deny-hook-bypass/
+# NAME.cmd is a Bash command: without NAME.expect it must be allowed, with it
+# blocked with that text. bash_input wraps it in Claude Code's hook input.
+guard="$root/.starling/bin/deny-hook-bypass"
+bash_input() {
+	LC_ALL=C awk 'BEGIN { RS = "\001" } {
+		s = $0; sub(/\n$/, "", s); out = ""
+		for (i = 1; i <= length(s); i++) {
+			c = substr(s, i, 1)
+			if (c == "\\") c = "\\\\"
+			else if (c == "\"") c = "\\\""
+			else if (c == "\n") c = "\\n"
+			else if (c == "\t") c = "\\t"
+			out = out c
+		}
+		printf "{\"session_id\":\"test\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"%s\",\"description\":\"test\"}}", out
+	}' "$1"
+}
+for cmd in "$root"/tests/deny-hook-bypass/*.cmd; do
+	name="guard: $(basename "$cmd" .cmd)"
+	out=$(bash_input "$cmd" | run "$guard" 2>&1)
+	status=$?
+	if [ -f "${cmd%.cmd}.expect" ]; then
+		want=$(cat "${cmd%.cmd}.expect")
+		if [ "$status" -eq 2 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+			bad "$name" "expected exit 2 and \"$want\", got exit $status:
+$out"
+		fi
+	elif [ "$status" -eq 0 ] && [ -z "$out" ]; then ok; else
+		bad "$name" "expected to be allowed, got exit $status:
+$out"
+	fi
+done
+out=$(printf 'not json' | run "$guard" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "guard: unreadable input" "expected to be allowed: $out"; fi
+
 # Activation sets core.hooksPath, unless another tool set it.
 act="$root/.starling/bin/activate-hooks"
 mkdir -p "$tmp/act/.starling/hooks" && git init -q "$tmp/act" || exit 2
