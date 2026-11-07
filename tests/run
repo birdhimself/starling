@@ -62,6 +62,20 @@ expect "$repo" "hook: invalid message" 1 'type `chore` is not allowed' "$hook" "
 # Usage errors.
 expect "$repo" "usage: no arguments" 2 "usage:" "$check"
 
+# Every .starling/ path that Starling's instructions name exists.
+missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
+	awk '{
+		s = $0
+		while (match(s, /`\.starling\/[^` "]*/)) {
+			print substr(s, RSTART + 1, RLENGTH - 1)
+			s = substr(s, RSTART + RLENGTH)
+		}
+	}' "$md" | while read -r path; do
+		[ -e "$root/$path" ] || echo "${md#"$root"/} names $path"
+	done
+done)
+if [ -z "$missing" ]; then ok; else bad "instructions: named paths exist" "$missing"; fi
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then
