@@ -1,0 +1,90 @@
+# Installed by Starling (https://github.com/birdhimself/starling) and
+# replaced on every update: change it in Starling, not here.
+#
+# Checks commit messages with .starling/bin/check-commit-msg, the same
+# checker the commit-msg hook runs: every commit of a pull request once it
+# is ready for review, and every commit pushed to main.
+
+name: Commits
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+
+# A newer push to a pull request supersedes the run for its older head, so
+# only pull_request runs share a group, one per pull request, and cancel
+# each other. Every other run is grouped by its own run id and never waits
+# for or cancels another. A cancelled run concludes as cancelled, never as
+# success, so the merge gate still cannot pass without a range. Drafts get a
+# group of their own: a draft's run skips the job, and when a pull request is
+# marked ready right after it opens, the draft's run can start last and
+# would otherwise cancel the run that checks it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.draft && 'draft' || 'ready' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  commits:
+    # A draft's run skips this job but still reports a check, and branch
+    # protection counts a skipped check as passing and goes by the latest one
+    # of each name, so a skipped check must never be named "Check commits".
+    # GitHub does not evaluate the name of a skipped job and shows this
+    # expression as it stands, which differs from "Check commits"; should it
+    # ever evaluate it, a draft gets "Check commits (draft)". Either way, only
+    # a run that checks commits reports "Check commits". A plain name would
+    # let a draft's skipped check stand in for a real one.
+    name: ${{ github.event.pull_request.draft && 'Check commits (draft)' || 'Check commits' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # The commit-msg hook checks every commit locally, and drafts may still
+    # hold fixup! commits, so the check starts at ready_for_review, which is
+    # also when it begins to gate the merge. Pushes to main always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check pull request commits
+        if: github.event_name == 'pull_request'
+        env:
+          RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: .starling/bin/check-commit-msg --range "$RANGE" --reject-merges --reject-fixups
+
+      - name: Check pushed commits
+        if: >-
+          github.event_name == 'push' &&
+          github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          RANGE: ${{ github.event.before }}..${{ github.sha }}
+        run: .starling/bin/check-commit-msg --range "$RANGE" --reject-merges --reject-fixups
+
+      # Both steps above are conditional, and a skipped step still reports
+      # success. This job is a merge gate, so it must never go green without
+      # having read a commit range.
+      - name: Refuse to pass without checking a range
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name != 'push' ||
+          github.event.before == '0000000000000000000000000000000000000000')
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          echo "The $EVENT event checked no commit range; refusing to report success."
+          exit 1
