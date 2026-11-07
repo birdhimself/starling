@@ -3,6 +3,8 @@
 #
 # tests/commit-msg/NAME.msg is a commit message. Without NAME.expect it must
 # pass; with NAME.expect it must fail with output containing that file's text.
+# Messages are checked in a scratch repository whose .starling.conf allows the
+# scopes api, deps, server and ui.
 #
 # TEST_SH runs the scripts under test with a given shell, e.g. TEST_SH=dash.
 # Without it, they run with their own #! line.
@@ -19,82 +21,82 @@ ok() { passed=$((passed + 1)); }
 bad() { failed=$((failed + 1)); printf 'FAIL %s\n%s\n\n' "$1" "$2"; }
 run() { ${TEST_SH:+$TEST_SH} "$@"; }
 
-# Messages, checked as the commit-msg hook checks them.
-for msg in "$msgs"/*.msg; do
-	name=$(basename "$msg" .msg)
-	expect=${msg%.msg}.expect
-	out=$(run "$check" "$msg" 2>&1)
-	status=$?
-	if [ -f "$expect" ]; then
-		want=$(cat "$expect")
-		if [ "$status" -eq 1 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
-			bad "$name" "expected exit 1 and \"$want\", got exit $status:
-$out"
-		fi
-	elif [ "$status" -eq 0 ]; then ok; else
-		bad "$name" "expected to pass, got exit $status:
-$out"
-	fi
+# Scratch repositories: $repo allows scopes, $other starts without a list.
+tmp=$(mktemp -d) || exit 2
+trap 'rm -rf "$tmp"' EXIT
+repo=$tmp/repo
+other=$tmp/other
+for dir in "$repo" "$other"; do
+	git init -q -b main "$dir" &&
+		git -C "$dir" config user.name Test &&
+		git -C "$dir" config user.email test@example.com || exit 2
 done
+printf '[commit]\n\tscopes = api deps server ui\n' >"$repo/.starling.conf"
 
-# The hook passes the message file on to the checker.
-if run "$hook" "$msgs/valid-full.msg" >/dev/null 2>&1; then ok; else
-	bad "hook: valid message" "expected the commit-msg hook to pass"
-fi
-out=$(run "$hook" "$msgs/chore.msg" 2>&1)
-status=$?
-if [ "$status" -eq 1 ] && printf '%s\n' "$out" | grep -qF 'type `chore` is not allowed'; then ok; else
-	bad "hook: invalid message" "expected exit 1 and the checker's output, got exit $status:
-$out"
-fi
-
-# Usage errors.
-out=$(run "$check" 2>&1)
-status=$?
-if [ "$status" -eq 2 ] && printf '%s\n' "$out" | grep -qF 'usage:'; then ok; else
-	bad "usage: no arguments" "expected exit 2 and the usage, got exit $status:
-$out"
-fi
-
-# Ranges, checked as CI checks them, in a scratch repository.
-repo=$(mktemp -d) || exit 2
-trap 'rm -rf "$repo"' EXIT
-(
-	cd "$repo" || exit 2
-	git init -q -b main
-	git config user.name Test
-	git config user.email test@example.com
-	git commit -q --allow-empty -F "$msgs/valid-full.msg"
-	git commit -q --allow-empty -F "$msgs/valid-breaking.msg"
-) || exit 2
-base=$(git -C "$repo" rev-list --max-parents=0 HEAD)
-
-range_case() { # NAME WANT_STATUS WANT_TEXT ARGS...
-	name=$1 want_status=$2 want=$3
-	shift 3
-	out=$(cd "$repo" && run "$check" --range "$@" 2>&1)
+# expect DIR NAME WANT_STATUS WANT_TEXT COMMAND ARGS...: run the command in DIR.
+expect() {
+	dir=$1 name=$2 want_status=$3 want=$4
+	shift 4
+	out=$(cd "$dir" && run "$@" 2>&1)
 	status=$?
 	if [ "$status" -eq "$want_status" ] && { [ -z "$want" ] || printf '%s\n' "$out" | grep -qF -- "$want"; }; then ok; else
-		bad "range: $name" "expected exit $want_status and \"$want\", got exit $status:
+		bad "$name" "expected exit $want_status and \"$want\", got exit $status:
 $out"
 	fi
 }
 
-range_case "clean range passes" 0 "" "$base..HEAD"
-range_case "unreadable range fails" 2 "cannot read the commit range" "nope..HEAD"
+# Messages, checked as the commit-msg hook checks them.
+for msg in "$msgs"/*.msg; do
+	name=$(basename "$msg" .msg)
+	if [ -f "${msg%.msg}.expect" ]; then
+		expect "$repo" "$name" 1 "$(cat "${msg%.msg}.expect")" "$check" "$msg"
+	else
+		expect "$repo" "$name" 0 "" "$check" "$msg"
+	fi
+done
+
+# The hook passes the message file on to the checker.
+expect "$repo" "hook: valid message" 0 "" "$hook" "$msgs/valid-full.msg"
+expect "$repo" "hook: invalid message" 1 'type `chore` is not allowed' "$hook" "$msgs/chore.msg"
+
+# Usage errors.
+expect "$repo" "usage: no arguments" 2 "usage:" "$check"
+
+# Scopes come from the repository's .starling.conf.
+expect "$other" "scopes: none without a list" 1 \
+	'this repository defines no scopes; drop `(api)`: `feat!: drop the v1 widget endpoints`' \
+	"$check" "$msgs/valid-breaking.msg"
+expect "$other" "scopes: no scope without a list" 0 "" "$check" "$msgs/valid-full.msg"
+printf '[commit]\n\tscopes = server\n\tscopes = ui\n' >"$other/.starling.conf"
+expect "$other" "scopes: every scopes line counts" 0 "" "$check" "$msgs/valid-note-in-body.msg"
+expect "$other" "scopes: listed on separate lines" 1 "this repository allows: server, ui" \
+	"$check" "$msgs/valid-breaking.msg"
+printf '[commit\n\tscopes = server\n' >"$other/.starling.conf"
+expect "$other" "scopes: unreadable .starling.conf" 2 "cannot read" "$check" "$msgs/valid-full.msg"
+
+# Ranges, checked as CI checks them.
+git -C "$repo" commit -q --allow-empty -F "$msgs/valid-full.msg" || exit 2
+git -C "$repo" commit -q --allow-empty -F "$msgs/valid-breaking.msg" || exit 2
+base=$(git -C "$repo" rev-list --max-parents=0 HEAD)
+
+expect "$repo" "range: clean range passes" 0 "" "$check" --range "$base..HEAD"
+expect "$repo" "range: unreadable range fails" 2 "cannot read the commit range" "$check" --range "nope..HEAD"
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-fixup.msg"
-range_case "fixup passes by default" 0 "" "$base..HEAD"
-range_case "fixup fails with --reject-fixups" 1 "git rebase -i --autosquash" "$base..HEAD" --reject-fixups
+expect "$repo" "range: fixup passes by default" 0 "" "$check" --range "$base..HEAD"
+expect "$repo" "range: fixup fails with --reject-fixups" 1 "git rebase -i --autosquash" \
+	"$check" --range "$base..HEAD" --reject-fixups
 git -C "$repo" commit -q --allow-empty -F "$msgs/chore.msg"
-range_case "bad message fails and names the commit" 1 "chore(deps): update vite" "$base..HEAD"
-range_case "failure points to the skill" 1 "commit-changes skill" "$base..HEAD"
+expect "$repo" "range: bad message fails and names the commit" 1 "chore(deps): update vite" \
+	"$check" --range "$base..HEAD"
+expect "$repo" "range: failure points to the skill" 1 "commit-changes skill" "$check" --range "$base..HEAD"
 git -C "$repo" reset -q --hard HEAD~2
 git -C "$repo" checkout -q -b side
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-url-line.msg"
 git -C "$repo" checkout -q main
 git -C "$repo" merge -q --no-ff --no-edit side
-range_case "merge passes by default" 0 "" "$base..HEAD"
-range_case "merge fails with --reject-merges" 1 "Merge commits are not allowed" "$base..HEAD" --reject-merges
+expect "$repo" "range: merge passes by default" 0 "" "$check" --range "$base..HEAD"
+expect "$repo" "range: merge fails with --reject-merges" 1 "Merge commits are not allowed" \
+	"$check" --range "$base..HEAD" --reject-merges
 
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]

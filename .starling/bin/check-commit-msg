@@ -11,7 +11,16 @@
 #       --reject-fixups  fail on fixup!/squash!/amend! commits instead of
 #                        skipping them
 #
-# Exit status: 0 every message passes, 1 a message breaks a rule, 2 usage.
+# Scopes are the repository's choice. A header may only use a scope listed in
+# .starling.conf at the repository root, which is in git's config format:
+#
+#     [commit]
+#         scopes = client server deps
+#
+# Without that list, headers take no scope.
+#
+# Exit status: 0 every message passes, 1 a message breaks a rule, 2 usage or
+# an unreadable .starling.conf.
 #
 # Needs only POSIX sh, POSIX awk and git. Lengths are counted in characters,
 # not bytes: under LC_ALL=C, awk sees UTF-8 bytes, and every byte in
@@ -30,6 +39,22 @@ top=$(git rev-parse --show-toplevel 2>/dev/null) || top=
 hint="Commit conventions: ${starling_dir#"$top"/}/skills/commit-changes/SKILL.md
 Agents: write commit messages with the commit-changes skill."
 
+# The scopes this repository allows, from .starling.conf. git config exits 1
+# when the key is unset, and higher when it cannot read the file.
+scopes=
+conf=${top:+$top/.starling.conf}
+if [ -n "$conf" ] && [ -f "$conf" ]; then
+	scopes=$(git config --file "$conf" --get-all commit.scopes)
+	case $? in
+	0 | 1) ;;
+	*)
+		echo "check-commit-msg: cannot read $conf" >&2
+		exit 2
+		;;
+	esac
+	scopes=$(printf '%s\n' "$scopes" | tr '\n' ' ')
+fi
+
 rules='
 function chars(s,   t, c) { t = s; c = gsub(/[\200-\277]/, "", t); return length(s) - c }
 function err(line, text) { errs[line] = errs[line] (line > 0 ? "  line " line ": " : "  ") text "\n"; errors++ }
@@ -38,6 +63,8 @@ BEGIN {
 	split(types, t, " "); for (i in t) allowed[t[i]] = 1
 	types_list = "build, ci, docs, feat, fix, perf, refactor, revert, style, test"
 	canon["refs"] = "Refs"; canon["co-authored-by"] = "Co-authored-by"; canon["signed-off-by"] = "Signed-off-by"
+	nscopes = split(scopes, sl, " ")
+	for (i = 1; i <= nscopes; i++) { scope_ok[sl[i]] = 1; scopes_list = scopes_list (i > 1 ? ", " : "") sl[i] }
 }
 { msg[NR] = $0 }
 END {
@@ -55,7 +82,7 @@ END {
 
 	# Header: type(scope)!: description
 	if (header ~ /^chore([(!:]|$)/) {
-		err(1, "type `chore` is not allowed. Use build(deps) for dependencies and lockfiles, build for tooling, ci for CI, docs for documentation; if no type fits, the commit probably mixes topics and should be split")
+		err(1, "type `chore` is not allowed. Use build for dependencies, lockfiles and tooling, ci for CI, docs for documentation; if no type fits, the commit probably mixes topics and should be split")
 	} else if (header !~ /^[a-z]+(\([^()]*\))?!?: /) {
 		err(1, "the header must be `type(scope): description`, scope optional, with a type from: " types_list)
 	} else {
@@ -63,7 +90,9 @@ END {
 		if (!(type in allowed)) err(1, "unknown type `" type "`; use one of: " types_list)
 		if (header ~ /^[a-z]+\(/) {
 			scope = header; sub(/^[a-z]+\(/, "", scope); sub(/\).*$/, "", scope)
-			if (scope !~ /^[a-z0-9][a-z0-9._\/-]*$/) err(1, "the scope must be lowercase letters, digits, dots, slashes or hyphens, e.g. `fix(server): ...`")
+			unscoped = header; sub(/\([^()]*\)/, "", unscoped)
+			if (nscopes == 0) err(1, "this repository defines no scopes; drop `(" scope ")`: `" unscoped "`")
+			else if (!(scope in scope_ok)) err(1, "unknown scope `" scope "`; this repository allows: " scopes_list)
 		}
 		desc = header; sub(/^[^:]*: /, "", desc)
 		if (desc ~ /^[ \t]*$/) err(1, "the description after `: ` is empty")
@@ -122,7 +151,7 @@ END {
 # check FILE [REJECT_FIXUPS]: print the problems with one cleaned message.
 check() {
 	trailers=$(git interpret-trailers --parse <"$1" | grep -c .)
-	LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" "$rules" "$1"
+	LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" -v scopes="$scopes" "$rules" "$1"
 }
 
 tmp=$(mktemp) || exit 2
