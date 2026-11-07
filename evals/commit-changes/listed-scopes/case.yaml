@@ -1,0 +1,65 @@
+schema_version: "1.1"
+name: commit-changes-listed-scopes
+description: >-
+  A fix in lib/ in a repository that lists the scopes cli and lib becomes one fix(lib) commit.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Commit my changes.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: runs-the-checker
+    type: tool_used
+    tool: Bash
+    input_match: check-commit-msg
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: one-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit'
+    match: count:1
+  - name: fix-with-lib-scope
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: fix\(lib\): '
+  - name: last-message-has-a-body
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]+\n\n[^\n#]'
+  - name: last-message-wrapped-at-72
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]{73,}$'
+    flags: m
+    match: not_contains
+  - name: last-message-trailer-rules
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: 'Co-Authored-By|Claude-Session'
+    match: not_contains
+  - name: no-co-author-for-your-edits
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: co-authored-by
+    flags: i
+    match: not_contains

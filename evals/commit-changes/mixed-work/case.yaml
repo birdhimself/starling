@@ -1,0 +1,79 @@
+schema_version: "1.1"
+name: commit-changes-mixed-work
+description: >-
+  A bug fix with its test and an unrelated README typo become two commits, a fix and a docs commit, without scopes.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Commit my changes.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: runs-the-checker
+    type: tool_used
+    tool: Bash
+    input_match: check-commit-msg
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: two-commits
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit'
+    match: count:2
+  - name: a-fix-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: fix: '
+  - name: a-docs-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: docs: '
+  - name: last-message-has-a-body
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]+\n\n[^\n#]'
+  - name: last-message-wrapped-at-72
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: '^[^\n]{73,}$'
+    flags: m
+    match: not_contains
+  - name: last-message-trailer-rules
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: 'Co-Authored-By|Claude-Session'
+    match: not_contains
+  - name: no-co-author-for-your-edits
+    type: regex
+    target: {source: file, path: .git/COMMIT_EDITMSG}
+    pattern: co-authored-by
+    flags: i
+    match: not_contains
+  - name: fix-body-explains
+    type: llm
+    focus: trace
+    criteria: >-
+      Find the commit message the agent wrote for the change to
+      lib/label.js. PASS if its body, the text between the header and any
+      trailers, says what was wrong (a group with exactly one widget was
+      labeled "1 widgets") and what the change does about it, in prose. The
+      wording may differ and it need not name files. FAIL only if the body
+      is missing, merely restates the header, or only lists files.

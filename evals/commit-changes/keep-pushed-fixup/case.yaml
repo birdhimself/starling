@@ -1,0 +1,46 @@
+schema_version: "1.1"
+name: commit-changes-keep-pushed-fixup
+description: >-
+  A fix for the branch's pushed commit becomes a fixup commit left for folding before review, without rewriting history.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Commit my changes.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: no-rewrite
+    type: tool_used
+    tool: Bash
+    input_match: git\s+rebase|--amend
+    min: 0
+    max: 0
+  - name: fixup-commit
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: fixup! feat: show the unit in widget labels'
+  - name: history-kept
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\trebase|\tcommit \(amend\)'
+    match: not_contains

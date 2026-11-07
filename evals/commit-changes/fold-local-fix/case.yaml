@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: commit-changes-fold-local-fix
+description: >-
+  A fix for the branch's unpushed commit is folded into it instead of becoming a separate commit.
+tags: [commit-changes]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Commit my changes.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: commit-changes
+  - name: never-pushes
+    type: tool_used
+    tool: Bash
+    input_match: git\s+push
+    min: 0
+    max: 0
+  - name: never-skips-hooks
+    type: tool_used
+    tool: Bash
+    input_match: --no-verify
+    min: 0
+    max: 0
+  - name: folds-the-fix
+    type: tool_used
+    tool: Bash
+    input_match: --fixup|--amend
+  - name: no-separate-fix
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit: fix(\([^)]*\))?!?: '
+    match: not_contains
+  - name: feature-commit-rewritten
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\t(commit \(amend\)|rebase \(fixup\)): feat: show the unit in widget labels'
