@@ -27,7 +27,9 @@ files in it: changes belong in the Starling repository.
 - Commit with the `commit-changes` skill. Agents without skills follow
   `.starling/skills/commit-changes/SKILL.md`. The commit-msg hook and CI
   check every message with `.starling/bin/check-commit-msg`.
-- Never bypass hooks with `--no-verify`.
+- Never bypass or switch off git hooks: no `--no-verify`, `git commit -n`
+  or changes to `core.hooksPath`. A repository's own hooks go in
+  `.githooks/<name>`, which Starling's hooks run after their own checks.
 - When you, an AI model, wrote or co-wrote the code or text a commit
   changes, end its message with `Co-authored-by: <model> <address>` for the
   model actually running, in exactly this casing, e.g.

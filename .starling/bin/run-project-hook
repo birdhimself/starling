@@ -1,0 +1,27 @@
+#!/bin/sh
+# Starling: run the repository's own git hook, if it has one.
+#
+#   run-project-hook NAME [ARGS...]
+#
+# Starling's hooks own core.hooksPath, so a repository keeps its own hooks
+# in .githooks/NAME. Each of Starling's hooks runs its own check, if it has
+# one, and then this script, which runs .githooks/NAME with the hook's
+# arguments and standard input and exits with its status. Without that file
+# it does nothing.
+
+set -u
+[ $# -ge 1 ] || {
+	echo "usage: run-project-hook NAME [ARGS...]" >&2
+	exit 2
+}
+name=$1
+shift
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+hook="$top/.githooks/$name"
+[ -e "$hook" ] || exit 0
+if [ ! -x "$hook" ]; then
+	echo "Starling: .githooks/$name is not executable, so it did not run. Make it executable: chmod +x .githooks/$name" >&2
+	exit 0
+fi
+exec "$hook" "$@"

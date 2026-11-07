@@ -1,3 +1,5 @@
 #!/bin/sh
-# Starling: check the commit message against the shared commit conventions.
-exec "$(dirname -- "$0")/../bin/check-commit-msg" "$1"
+# Starling: check the commit message against the shared commit conventions,
+# then run the repository's own commit-msg hook in .githooks/, if any.
+"$(dirname -- "$0")/../bin/check-commit-msg" "$1" || exit
+exec "$(dirname -- "$0")/../bin/run-project-hook" commit-msg "$@"

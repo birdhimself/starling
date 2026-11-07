@@ -19,7 +19,7 @@ failed=0
 
 ok() { passed=$((passed + 1)); }
 bad() { failed=$((failed + 1)); printf 'FAIL %s\n%s\n\n' "$1" "$2"; }
-run() { ${TEST_SH:+$TEST_SH} "$@"; }
+run() { if [ -f "$1" ]; then ${TEST_SH:+$TEST_SH} "$@"; else "$@"; fi; }
 
 # Scratch repositories: $repo allows scopes, $other starts without a list.
 tmp=$(mktemp -d) || exit 2
@@ -148,6 +148,41 @@ expect "$other" "context: no commits yet" 2 "cannot read .starling.conf" "$conte
 rm "$other/.starling.conf"
 expect "$other" "context: no commits yet" 0 "Commits: none yet" "$context"
 expect "$tmp" "context: outside a repository" 2 "not inside a git work tree" "$context"
+
+# Starling's hooks run the repository's own hooks in .githooks/.
+for h in pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit \
+	pre-rebase post-checkout post-merge post-rewrite pre-push; do
+	if [ -x "$root/.starling/hooks/$h" ]; then ok; else bad "hooks: $h" "missing or not executable"; fi
+done
+fwd=$tmp/fwd
+{
+	git init -q "$fwd" &&
+		git -C "$fwd" config user.name Test &&
+		git -C "$fwd" config user.email test@example.com &&
+		git -C "$fwd" config commit.gpgsign false &&
+		git -C "$fwd" config core.hooksPath "$root/.starling/hooks" &&
+		mkdir "$fwd/.githooks"
+} || exit 2
+printf '#!/bin/sh\necho "$(basename "$0") $*" >>.git/ran\n' >"$fwd/.githooks/pre-commit"
+cp "$fwd/.githooks/pre-commit" "$fwd/.githooks/commit-msg"
+chmod +x "$fwd/.githooks/pre-commit" "$fwd/.githooks/commit-msg"
+expect "$fwd" "hooks: commit with project hooks" 0 "" git commit -q --allow-empty -F "$msgs/valid-full.msg"
+if grep -q '^pre-commit' "$fwd/.git/ran" && grep -q '^commit-msg .git/COMMIT_EDITMSG' "$fwd/.git/ran"; then ok; else
+	bad "hooks: project hooks ran" "$(cat "$fwd/.git/ran" 2>&1)"
+fi
+rm -f "$fwd/.git/ran"
+expect "$fwd" "hooks: Starling's check runs first" 1 'type `chore` is not allowed' \
+	git commit -q --allow-empty -F "$msgs/chore.msg"
+if [ ! -s "$fwd/.git/ran" ] || ! grep -q '^commit-msg' "$fwd/.git/ran"; then ok; else
+	bad "hooks: project commit-msg after a failed check" "it ran: $(cat "$fwd/.git/ran")"
+fi
+printf '#!/bin/sh\nexit 1\n' >"$fwd/.githooks/pre-commit"
+expect "$fwd" "hooks: a failing project hook stops the commit" 1 "" \
+	git commit -q --allow-empty -F "$msgs/valid-full.msg"
+rm "$fwd/.githooks/pre-commit"
+printf '#!/bin/sh\nexit 0\n' >"$fwd/.githooks/post-commit"
+expect "$fwd" "hooks: a project hook that is not executable" 0 ".githooks/post-commit is not executable" \
+	git commit -q --allow-empty -F "$msgs/valid-full.msg"
 
 # Ranges, checked as CI checks them.
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-full.msg" || exit 2
