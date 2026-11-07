@@ -1,0 +1,174 @@
+#!/bin/sh
+# Starling: check commit messages against the shared commit conventions.
+#
+#   check-commit-msg FILE
+#       Check one message file, as the commit-msg hook does. Comment lines and
+#       everything below a scissors line are ignored, as git ignores them.
+#
+#   check-commit-msg --range REV-RANGE [--reject-merges] [--reject-fixups]
+#       Check every non-merge commit in REV-RANGE, as CI does.
+#       --reject-merges  fail if the range contains a merge commit
+#       --reject-fixups  fail on fixup!/squash!/amend! commits instead of
+#                        skipping them
+#
+# Exit status: 0 every message passes, 1 a message breaks a rule, 2 usage.
+#
+# Needs only POSIX sh, POSIX awk and git. Lengths are counted in characters,
+# not bytes: under LC_ALL=C, awk sees UTF-8 bytes, and every byte in
+# 0x80-0xBF continues a character rather than starting one.
+
+set -u
+
+usage() {
+	echo "usage: check-commit-msg FILE" >&2
+	echo "       check-commit-msg --range REV-RANGE [--reject-merges] [--reject-fixups]" >&2
+	exit 2
+}
+
+starling_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+top=$(git rev-parse --show-toplevel 2>/dev/null) || top=
+hint="Commit conventions: ${starling_dir#"$top"/}/skills/commit-changes/SKILL.md
+Agents: write commit messages with the commit-changes skill."
+
+rules='
+function chars(s,   t, c) { t = s; c = gsub(/[\200-\277]/, "", t); return length(s) - c }
+function err(line, text) { errs[line] = errs[line] (line > 0 ? "  line " line ": " : "  ") text "\n"; errors++ }
+BEGIN {
+	types = "build ci docs feat fix perf refactor revert style test"
+	split(types, t, " "); for (i in t) allowed[t[i]] = 1
+	types_list = "build, ci, docs, feat, fix, perf, refactor, revert, style, test"
+	canon["refs"] = "Refs"; canon["co-authored-by"] = "Co-authored-by"; canon["signed-off-by"] = "Signed-off-by"
+}
+{ msg[NR] = $0 }
+END {
+	n = NR
+	while (n > 0 && msg[n] ~ /^[ \t]*$/) n--
+	if (n == 0) { printf "  the message is empty\n"; exit 1 }
+	header = msg[1]
+
+	# Messages git writes itself are exempt.
+	if (header ~ /^(fixup|squash|amend)! /) {
+		if (rejectfixups) { printf "  line 1: fold this commit into the one it corrects before review: git rebase -i --autosquash <base>\n"; exit 1 }
+		exit 0
+	}
+	if (header ~ /^Revert "/ || header ~ /^Merge /) exit 0
+
+	# Header: type(scope)!: description
+	if (header ~ /^chore([(!:]|$)/) {
+		err(1, "type `chore` is not allowed. Use build(deps) for dependencies and lockfiles, build for tooling, ci for CI, docs for documentation; if no type fits, the commit probably mixes topics and should be split")
+	} else if (header !~ /^[a-z]+(\([^()]*\))?!?: /) {
+		err(1, "the header must be `type(scope): description`, scope optional, with a type from: " types_list)
+	} else {
+		type = header; sub(/[(!:].*$/, "", type)
+		if (!(type in allowed)) err(1, "unknown type `" type "`; use one of: " types_list)
+		if (header ~ /^[a-z]+\(/) {
+			scope = header; sub(/^[a-z]+\(/, "", scope); sub(/\).*$/, "", scope)
+			if (scope !~ /^[a-z0-9][a-z0-9._\/-]*$/) err(1, "the scope must be lowercase letters, digits, dots, slashes or hyphens, e.g. `fix(server): ...`")
+		}
+		desc = header; sub(/^[^:]*: /, "", desc)
+		if (desc ~ /^[ \t]*$/) err(1, "the description after `: ` is empty")
+		else if (desc ~ /^[A-Z][a-z]/) err(1, "start the description in lowercase, in the imperative: `fix: handle ...`, not `fix: Handle ...`")
+		if (desc ~ /\.$/) err(1, "drop the period at the end of the header")
+	}
+	if (chars(header) > 72) err(1, "the header is " chars(header) " characters; keep it to 72")
+
+	if (n == 1) {
+		err(0, "add a body after a blank line: what changed and why")
+	} else {
+		if (msg[2] !~ /^[ \t]*$/) err(2, "leave line 2 blank, between the header and the body")
+
+		# The trailer block is the last paragraph, when git reads trailers there.
+		tb = n + 1
+		if (ntrailers > 0) { tb = n; while (tb > 1 && msg[tb - 1] !~ /^[ \t]*$/) tb-- }
+		if (tb < 3) tb = 3
+		for (i = tb; i <= n; i++) {
+			line = msg[i]
+			if (line ~ /^[ \t]/) continue
+			if (line !~ /^[A-Za-z0-9-]+: /) { err(i, "this line is in the trailer block (the last paragraph) but is not a trailer; move it above the blank line before the trailers"); continue }
+			key = line; sub(/: .*$/, "", key)
+			value = line; sub(/^[^:]*: /, "", value)
+			k = tolower(key)
+			if (key == "Refs") {
+				if (value !~ /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[0-9]+(, ([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[0-9]+)*$/) err(i, "write issue references as `Refs: #123` or `Refs: #123, owner/repo#456`")
+			} else if (key == "Co-authored-by" || key == "Signed-off-by") {
+				if (value !~ /^[^<>]+ <[^<> ]+@[^<> ]+>$/) err(i, "write `" key ": Name <email>`")
+			} else if (k in canon) {
+				err(i, "write the trailer as `" canon[k] ":`, not `" key ":`")
+			} else if (k == "claude-session") {
+				err(i, "Claude-Session trailers are not allowed; remove it (in Claude Code, set attribution.sessionUrl to false)")
+			} else {
+				err(i, "unknown trailer `" key ":`; allowed are Refs, Co-authored-by and Signed-off-by. If this is body text, git reads it as a trailer because it is the last paragraph and starts with `Word:`; rephrase it")
+			}
+		}
+
+		body = 0
+		for (i = 3; i < tb; i++) {
+			line = msg[i]
+			if (line !~ /^[ \t]*$/) body++
+			l = tolower(line)
+			if (l ~ /^(refs|co-authored-by|signed-off-by|claude-session)[ \t]*:/) err(i, "trailers go in one block at the very end, with no blank line between them; move this line there")
+			else if (l ~ /^refs #[0-9]/) err(i, "write issue references as the trailer `Refs: #123` in the final trailer block")
+		}
+		if (body == 0) err(0, "add a body between the header and the trailers: what changed and why")
+
+		for (i = 2; i <= n; i++)
+			if (chars(msg[i]) > 72 && msg[i] !~ /:\/\//) err(i, "this line is " chars(msg[i]) " characters; wrap at 72 (lines containing a URL are exempt)")
+	}
+
+	for (i = 0; i <= n; i++) if (i in errs) printf "%s", errs[i]
+	exit errors > 0
+}'
+
+# check FILE [REJECT_FIXUPS]: print the problems with one cleaned message.
+check() {
+	trailers=$(git interpret-trailers --parse <"$1" | grep -c .)
+	LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" "$rules" "$1"
+}
+
+tmp=$(mktemp) || exit 2
+trap 'rm -f "$tmp"' EXIT
+
+if [ "${1:-}" != "--range" ]; then
+	[ $# -eq 1 ] && [ -f "$1" ] || usage
+	awk '/^# -+ >8 -+$/ { exit } { print }' "$1" | git stripspace --strip-comments >"$tmp"
+	if out=$(check "$tmp"); then exit 0; fi
+	printf '%s\n%s\n\n%s\n' "The commit message breaks the commit conventions:" "$out" "$hint" >&2
+	exit 1
+fi
+
+shift
+[ $# -ge 1 ] || usage
+range=$1
+shift
+reject_merges=0
+reject_fixups=0
+for opt in "$@"; do
+	case $opt in
+	--reject-merges) reject_merges=1 ;;
+	--reject-fixups) reject_fixups=1 ;;
+	*) usage ;;
+	esac
+done
+
+if ! git rev-list "$range" >/dev/null 2>&1; then
+	echo "check-commit-msg: cannot read the commit range '$range'" >&2
+	exit 2
+fi
+
+failed=0
+if [ "$reject_merges" = 1 ] && [ -n "$(git rev-list --merges "$range")" ]; then
+	echo "Merge commits are not allowed; rebase onto the base branch instead." >&2
+	failed=1
+fi
+for sha in $(git rev-list --no-merges --reverse "$range"); do
+	git log -1 --format=%B "$sha" >"$tmp"
+	if ! out=$(check "$tmp" "$reject_fixups"); then
+		printf '%s\n%s\n\n' "$(git log -1 --format='%h %s' "$sha")" "$out" >&2
+		failed=1
+	fi
+done
+if [ "$failed" = 1 ]; then
+	printf '%s\n' "$hint" >&2
+	exit 1
+fi
+exit 0
