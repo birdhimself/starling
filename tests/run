@@ -88,6 +88,11 @@ if cmp -s "$root/.claude/settings.json" "$root/.starling/claude-settings.json"; 
 	bad "settings: .claude/settings.json" "differs from .starling/claude-settings.json"
 fi
 
+# Starling checks its own commits with the workflow the installer installs.
+if cmp -s "$root/.github/workflows/starling-commits.yml" "$root/.starling/workflows/starling-commits.yml"; then ok; else
+	bad "workflow: .github/workflows/starling-commits.yml" "differs from .starling/workflows/starling-commits.yml"
+fi
+
 # Starling uses its own skills, linked as the installer links them.
 for skill in "$root"/.starling/skills/*/; do
 	name=$(basename "$skill")
