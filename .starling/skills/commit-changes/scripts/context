@@ -1,0 +1,102 @@
+#!/bin/sh
+# Starling: print the facts the commit-changes skill works from.
+#
+#   context
+#
+# Prints the scopes this repository allows, the branch, the base branch it
+# forked from, the branch's commits with whether each is pushed, any rebase
+# or merge in progress, and the changed files. Run it anywhere inside the
+# repository.
+#
+# Exit status: 0, or 2 outside a work tree or with an unreadable
+# .starling.conf.
+
+set -u
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "context: not inside a git work tree" >&2
+	exit 2
+}
+cd "$top" || exit 2
+
+# Scopes, from .starling.conf. git config exits 1 when the key is unset.
+scopes=
+if [ -f .starling.conf ]; then
+	scopes=$(git config --file .starling.conf --get-all commit.scopes)
+	case $? in
+	0 | 1) ;;
+	*)
+		echo "context: cannot read .starling.conf" >&2
+		exit 2
+		;;
+	esac
+	scopes=$(printf '%s\n' "$scopes" | tr '\n' ' ' | sed 's/   */ /g; s/^ //; s/ $//')
+fi
+if [ -n "$scopes" ]; then
+	echo "Scopes: $scopes"
+else
+	echo "Scopes: none, so headers take no scope"
+fi
+
+# Branch and upstream.
+branch=$(git symbolic-ref -q --short HEAD) || branch=
+upstream=$(git rev-parse -q --verify --symbolic-full-name '@{upstream}' 2>/dev/null) || upstream=
+if [ -z "$upstream" ] && [ -n "$branch" ] &&
+	git rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+	upstream=refs/remotes/origin/$branch
+fi
+if [ -z "$branch" ]; then
+	echo "Branch: none (detached HEAD)"
+elif [ -n "$upstream" ]; then
+	echo "Branch: $branch, pushed to ${upstream#refs/remotes/}"
+else
+	echo "Branch: $branch, never pushed"
+fi
+
+# In-progress operations.
+for op in rebase-merge:rebase rebase-apply:rebase MERGE_HEAD:merge CHERRY_PICK_HEAD:cherry-pick REVERT_HEAD:revert; do
+	if [ -e "$(git rev-parse --git-path "${op%%:*}")" ]; then
+		echo "In progress: a ${op#*:}; finish or abort it before committing"
+		break
+	fi
+done
+
+# Base: the remote's default branch, else main or master.
+base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || base=
+if [ -z "$base" ]; then
+	for candidate in origin/main origin/master main master; do
+		if git rev-parse -q --verify "$candidate^{commit}" >/dev/null; then
+			base=$candidate
+			break
+		fi
+	done
+fi
+
+if ! git rev-parse -q --verify HEAD >/dev/null; then
+	echo "Commits: none yet"
+elif [ -z "$base" ] || ! fork=$(git merge-base "$base" HEAD 2>/dev/null); then
+	echo "Base: none found; do not fold fixes into earlier commits"
+else
+	echo "Base: $base, forked at $(git rev-parse --short "$fork")"
+	echo "Commits on this branch, oldest first:"
+	commits=$(git log --reverse --format='%H %h %s' "$fork..HEAD")
+	if [ -z "$commits" ]; then
+		echo "  none"
+	else
+		printf '%s\n' "$commits" | while read -r sha short subject; do
+			state=local
+			if [ -n "$upstream" ] && git merge-base --is-ancestor "$sha" "$upstream"; then
+				state=pushed
+			fi
+			printf '  %s %-6s %s\n' "$short" "$state" "$subject"
+		done
+	fi
+fi
+
+echo "Changes:"
+changes=$(git status --short --untracked-files=all)
+if [ -n "$changes" ]; then
+	printf '%s\n' "$changes" | sed 's/^/  /'
+else
+	echo "  none"
+fi
