@@ -1,0 +1,100 @@
+#!/bin/sh
+# Run Starling's tests. Needs only POSIX sh and git.
+#
+# tests/commit-msg/NAME.msg is a commit message. Without NAME.expect it must
+# pass; with NAME.expect it must fail with output containing that file's text.
+#
+# TEST_SH runs the scripts under test with a given shell, e.g. TEST_SH=dash.
+# Without it, they run with their own #! line.
+
+set -u
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+check="$root/.starling/bin/check-commit-msg"
+hook="$root/.starling/hooks/commit-msg"
+msgs="$root/tests/commit-msg"
+passed=0
+failed=0
+
+ok() { passed=$((passed + 1)); }
+bad() { failed=$((failed + 1)); printf 'FAIL %s\n%s\n\n' "$1" "$2"; }
+run() { ${TEST_SH:+$TEST_SH} "$@"; }
+
+# Messages, checked as the commit-msg hook checks them.
+for msg in "$msgs"/*.msg; do
+	name=$(basename "$msg" .msg)
+	expect=${msg%.msg}.expect
+	out=$(run "$check" "$msg" 2>&1)
+	status=$?
+	if [ -f "$expect" ]; then
+		want=$(cat "$expect")
+		if [ "$status" -eq 1 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+			bad "$name" "expected exit 1 and \"$want\", got exit $status:
+$out"
+		fi
+	elif [ "$status" -eq 0 ]; then ok; else
+		bad "$name" "expected to pass, got exit $status:
+$out"
+	fi
+done
+
+# The hook passes the message file on to the checker.
+if run "$hook" "$msgs/valid-full.msg" >/dev/null 2>&1; then ok; else
+	bad "hook: valid message" "expected the commit-msg hook to pass"
+fi
+out=$(run "$hook" "$msgs/chore.msg" 2>&1)
+status=$?
+if [ "$status" -eq 1 ] && printf '%s\n' "$out" | grep -qF 'type `chore` is not allowed'; then ok; else
+	bad "hook: invalid message" "expected exit 1 and the checker's output, got exit $status:
+$out"
+fi
+
+# Usage errors.
+out=$(run "$check" 2>&1)
+status=$?
+if [ "$status" -eq 2 ] && printf '%s\n' "$out" | grep -qF 'usage:'; then ok; else
+	bad "usage: no arguments" "expected exit 2 and the usage, got exit $status:
+$out"
+fi
+
+# Ranges, checked as CI checks them, in a scratch repository.
+repo=$(mktemp -d) || exit 2
+trap 'rm -rf "$repo"' EXIT
+(
+	cd "$repo" || exit 2
+	git init -q -b main
+	git config user.name Test
+	git config user.email test@example.com
+	git commit -q --allow-empty -F "$msgs/valid-full.msg"
+	git commit -q --allow-empty -F "$msgs/valid-breaking.msg"
+) || exit 2
+base=$(git -C "$repo" rev-list --max-parents=0 HEAD)
+
+range_case() { # NAME WANT_STATUS WANT_TEXT ARGS...
+	name=$1 want_status=$2 want=$3
+	shift 3
+	out=$(cd "$repo" && run "$check" --range "$@" 2>&1)
+	status=$?
+	if [ "$status" -eq "$want_status" ] && { [ -z "$want" ] || printf '%s\n' "$out" | grep -qF -- "$want"; }; then ok; else
+		bad "range: $name" "expected exit $want_status and \"$want\", got exit $status:
+$out"
+	fi
+}
+
+range_case "clean range passes" 0 "" "$base..HEAD"
+range_case "unreadable range fails" 2 "cannot read the commit range" "nope..HEAD"
+git -C "$repo" commit -q --allow-empty -F "$msgs/valid-fixup.msg"
+range_case "fixup passes by default" 0 "" "$base..HEAD"
+range_case "fixup fails with --reject-fixups" 1 "git rebase -i --autosquash" "$base..HEAD" --reject-fixups
+git -C "$repo" commit -q --allow-empty -F "$msgs/chore.msg"
+range_case "bad message fails and names the commit" 1 "chore(deps): update vite" "$base..HEAD"
+range_case "failure points to the skill" 1 "commit-changes skill" "$base..HEAD"
+git -C "$repo" reset -q --hard HEAD~2
+git -C "$repo" checkout -q -b side
+git -C "$repo" commit -q --allow-empty -F "$msgs/valid-url-line.msg"
+git -C "$repo" checkout -q main
+git -C "$repo" merge -q --no-ff --no-edit side
+range_case "merge passes by default" 0 "" "$base..HEAD"
+range_case "merge fails with --reject-merges" 1 "Merge commits are not allowed" "$base..HEAD" --reject-merges
+
+echo "$passed passed, $failed failed"
+[ "$failed" -eq 0 ]

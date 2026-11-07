@@ -1,0 +1,3 @@
+#!/bin/sh
+# Starling: check the commit message against the shared commit conventions.
+exec "$(dirname -- "$0")/../bin/check-commit-msg" "$1"
