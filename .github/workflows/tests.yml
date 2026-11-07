@@ -1,0 +1,73 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # Scripts must work with every common sh and awk: dash and mawk are Debian's
+  # and Ubuntu's defaults, gawk and bash are common elsewhere.
+  linux:
+    name: ${{ matrix.sh }} with ${{ matrix.awk }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sh: dash
+            awk: mawk
+          - sh: bash
+            awk: gawk
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install ${{ matrix.sh }} and ${{ matrix.awk }}
+        env:
+          SH: ${{ matrix.sh }}
+          AWK: ${{ matrix.awk }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "$SH" "$AWK"
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -s "$(command -v "$AWK")" "$RUNNER_TEMP/bin/awk"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Run the tests
+        env:
+          TEST_SH: ${{ matrix.sh }}
+        run: |
+          awk -W version 2>/dev/null | head -n 1 || true
+          "$TEST_SH" tests/run
+
+  # Alpine: busybox sh and busybox awk, as in minimal containers.
+  busybox:
+    name: busybox sh with busybox awk
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Run the tests in Alpine
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src alpine:3.21
+          sh -c 'apk add --no-cache git >/dev/null && sh tests/run'
+
+  # macOS: its sh and the BSD awk.
+  macos:
+    name: macOS sh with BSD awk
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Run the tests
+        run: sh tests/run
