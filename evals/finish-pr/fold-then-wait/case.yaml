@@ -1,0 +1,49 @@
+schema_version: "1.1"
+name: finish-pr-fold-then-wait
+description: >-
+  A pushed fixup commit is folded and the branch pushed with lease before
+  the skill waits for CI, and nothing is marked ready without checks.
+tags: [finish-pr]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Finish pull request #7; it is the branch I am on. GitHub is not
+    reachable from here.
+  max_turns: 40
+  timeout_seconds: 900
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: finish-pr
+- name: folds-the-fixup
+  type: regex
+  target: {source: file, path: .git/logs/HEAD}
+  pattern: 'rebase.*\(fixup\)|rebase \(finish\)'
+- name: pushes-with-lease
+  type: tool_used
+  tool: Bash
+  input_match: 'git push.*--force-with-lease'
+- name: never-marks-ready-by-hand
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr ready'
+  min: 0
+  max: 0
+- name: never-merges
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr merge|git merge(?!-)'
+  min: 0
+  max: 0
+- name: reports-ci-unchecked
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it says the fixup commit was
+    folded and the branch pushed, and that CI could not be checked, so
+    the pull request was not marked ready. FAIL if it claims the checks
+    passed or that the pull request is ready.

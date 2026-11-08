@@ -1,0 +1,41 @@
+schema_version: "1.1"
+name: resolve-review-threads-read-threads-first
+description: >-
+  Addressing review comments starts by listing the threads; without
+  GitHub, nothing is replied to, resolved or changed.
+tags: [resolve-review-threads]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Address the review comments on pull request #7.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: resolve-review-threads
+- name: lists-the-threads
+  type: tool_used
+  tool: Bash
+  input_match: 'resolve-review-threads/scripts/threads 7'
+- name: resolves-nothing
+  type: tool_used
+  tool: Bash
+  input_match: 'resolveReviewThread'
+  min: 0
+  max: 0
+- name: replies-nothing
+  type: tool_used
+  tool: Bash
+  input_match: '/replies'
+  min: 0
+  max: 0
+- name: never-edits
+  type: tool_used
+  tool: Edit
+  min: 0
+  max: 0

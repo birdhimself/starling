@@ -1,0 +1,22 @@
+schema_version: "1.1"
+name: resolve-review-threads-skip-local-findings
+description: >-
+  Findings without a GitHub thread go to apply-review-findings.
+tags: [resolve-review-threads]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Apply this finding to my branch: cli/main.js passes the count as a
+    string, so one widget is still labeled "1 widgets".
+  max_turns: 30
+  timeout_seconds: 900
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: does-not-use-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: resolve-review-threads
+  min: 0
+  max: 0

@@ -242,6 +242,129 @@ if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF 'cannot read "Blocked by" for
 fi
 expect "$repo" "relations: usage" 2 "usage: relations ISSUE" "$relations" twelve
 
+# finish-pr's wait-ci script, against a fake gh that keeps the pull
+# request's state in files: head (the head commit, or move, the one it moves
+# to while a run is watched), runs (one "id status" line per run), checks
+# (lines with pass or fail), subjects, and on-ready (runs that marking it
+# ready starts).
+waitci="$root/.starling/skills/finish-pr/scripts/wait-ci"
+mkdir -p "$tmp/cibin" && cat >"$tmp/cibin/gh" <<'EOF'
+#!/bin/sh
+s=$FAKE_CI
+case "$1 $2" in
+"pr view")
+	case "$*" in
+	*headRefOid*) cat "$s/head" ;;
+	*commits*) cat "$s/subjects" ;;
+	esac
+	;;
+"run list")
+	case "$*" in
+	*databaseId,status*) awk '$2 != "completed" { print $1 }' "$s/runs" ;;
+	*) awk '{ print $1 }' "$s/runs" ;;
+	esac
+	;;
+"run watch")
+	awk -v id="$3" '$1 == id { $2 = "completed" } { print }' "$s/runs" >"$s/runs.new" && mv "$s/runs.new" "$s/runs"
+	if [ -f "$s/move" ]; then mv "$s/move" "$s/head"; fi
+	;;
+"pr checks")
+	cat "$s/checks"
+	if grep -q fail "$s/checks"; then exit 1; fi
+	;;
+"pr ready")
+	touch "$s/ready"
+	if [ -f "$s/on-ready" ]; then cat "$s/on-ready" >>"$s/runs"; fi
+	;;
+*)
+	echo "fake gh: $*" >&2
+	exit 1
+	;;
+esac
+EOF
+chmod +x "$tmp/cibin/gh"
+ci_state() { # RUNS CHECKS [SUBJECTS]
+	rm -rf "$tmp/ci" && mkdir "$tmp/ci" && echo abc123 >"$tmp/ci/head" &&
+		printf '%s' "$1" >"$tmp/ci/runs" && printf '%s\n' "$2" >"$tmp/ci/checks" &&
+		printf '%s' "${3:-}" >"$tmp/ci/subjects" || exit 2
+}
+wait_ci() { # NAME WANT_STATUS WANT_TEXT ARGS...
+	name=$1 want_status=$2 want=$3
+	shift 3
+	out=$(
+		cd "$repo" || exit 2
+		PATH="$tmp/cibin:$PATH" FAKE_CI="$tmp/ci" WAIT_CI_POLL=0 WAIT_CI_LIMIT=1
+		export PATH FAKE_CI WAIT_CI_POLL WAIT_CI_LIMIT
+		run "$waitci" "$@" 2>&1
+	)
+	status=$?
+	if [ "$status" -eq "$want_status" ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+		bad "$name" "expected exit $want_status and \"$want\", got exit $status:
+$out"
+	fi
+}
+wait_ci "wait-ci: no pull request" 2 "usage: wait-ci PR" ""
+wait_ci "wait-ci: not a number" 2 "usage: wait-ci PR" abc
+wait_ci "wait-ci: two pull requests" 2 "usage: wait-ci PR" 7 8
+ci_state '101 in_progress
+' 'build	pass'
+wait_ci "wait-ci: green" 0 "#7 head abc123" 7
+ci_state '101 in_progress
+' 'build	fail'
+wait_ci "wait-ci: red" 1 "build	fail" 7
+ci_state '101 completed
+' 'build	pass' 'feat: add widgets
+fixup! feat: add widgets'
+wait_ci "wait-ci: fixups refused" 1 "fixup! feat: add widgets" 7 --mark-ready
+ci_state '101 completed
+' 'build	pass'
+printf '200 queued\n' >"$tmp/ci/on-ready"
+wait_ci "wait-ci: marks ready and waits" 0 "build	pass" 7 --mark-ready
+if [ -f "$tmp/ci/ready" ] && grep -qx '200 completed' "$tmp/ci/runs"; then ok; else
+	bad "wait-ci: watched the runs marking it ready started" "$(cat "$tmp/ci/runs")"
+fi
+ci_state '101 completed
+' 'build	fail'
+wait_ci "wait-ci: a red draft stays a draft" 1 "not marking it ready" 7 --mark-ready
+if [ ! -f "$tmp/ci/ready" ]; then ok; else bad "wait-ci: a red draft is not marked ready" "marked ready"; fi
+ci_state '101 completed
+' 'build	pass'
+wait_ci "wait-ci: no runs on ready" 0 "its checks stand" 7 --mark-ready
+ci_state '101 in_progress
+' 'build	pass'
+echo def456 >"$tmp/ci/move"
+wait_ci "wait-ci: the head moved" 4 "moved to def456" 7
+ci_state '' 'build	pass'
+wait_ci "wait-ci: no runs at all" 3 "no run appeared on abc123" 7
+
+# resolve-review-threads' threads script, against a fake gh that records its
+# arguments. GitHub's GraphQL and jq are not run here.
+threads="$root/.starling/skills/resolve-review-threads/scripts/threads"
+mkdir -p "$tmp/threadbin" && cat >"$tmp/threadbin/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" >"$FAKE_ARGS"
+case "$*" in *pr=99*) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;; esac
+echo "No unresolved review threads."
+EOF
+chmod +x "$tmp/threadbin/gh"
+list_threads() { # ARGS...
+	out=$(cd "$repo" && PATH="$tmp/threadbin:$PATH" FAKE_ARGS="$tmp/threadargs" && export PATH FAKE_ARGS && run "$threads" "$@" 2>&1)
+}
+list_threads 12
+if [ $? -eq 0 ] && grep -qx 'pr=12' "$tmp/threadargs" && grep -qx 'owner={owner}' "$tmp/threadargs" &&
+	grep -q '^false as \$all' "$tmp/threadargs"; then ok; else
+	bad "threads: asks GitHub for the unresolved threads" "$out
+$(cat "$tmp/threadargs")"
+fi
+list_threads 12 --all
+if grep -q '^true as \$all' "$tmp/threadargs"; then ok; else bad "threads: --all" "$(cat "$tmp/threadargs")"; fi
+list_threads 99
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "cannot read the review threads of #99"; then ok; else
+	bad "threads: GitHub fails" "$out"
+fi
+list_threads twelve
+if [ $? -eq 2 ] && printf '%s\n' "$out" | grep -qF "usage: threads PR"; then ok; else bad "threads: usage" "$out"; fi
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then

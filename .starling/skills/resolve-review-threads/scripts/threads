@@ -1,0 +1,63 @@
+#!/bin/sh
+# Starling: list a pull request's review threads.
+#
+#   threads PR [--all]
+#
+# Prints the unresolved review threads of pull request PR in the current
+# repository, or with --all every thread. For each: the thread id, which
+# resolving it needs; the database id of its first comment, which a reply
+# needs; the file and line, and whether the thread is outdated or
+# resolved; then each comment's author and text. Threads only exist through
+# GraphQL; REST cannot tell whether one is resolved. Needs gh, logged in.
+#
+# Exit status: 0, 1 when GitHub cannot be read, 2 usage.
+
+set -u
+usage() {
+	echo "usage: threads PR [--all]" >&2
+	exit 2
+}
+pr=
+all=false
+for arg in "$@"; do
+	case $arg in
+	--all) all=true ;;
+	'' | *[!0-9]*) usage ;;
+	*)
+		[ -z "$pr" ] || usage
+		pr=$arg
+		;;
+	esac
+done
+[ -n "$pr" ] || usage
+
+query='query($owner: String!, $repo: String!, $pr: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100) {
+        totalCount
+        nodes {
+          id isResolved isOutdated path line originalLine
+          comments(first: 50) { nodes { databaseId author { login } body } }
+        }
+      }
+    }
+  }
+}'
+filter='.data.repository.pullRequest.reviewThreads |
+  ([.nodes[] | select($all or (.isResolved | not))] |
+    if length == 0 then "No \(if $all then "" else "unresolved " end)review threads."
+    else map(
+      "Thread \(.id) on \(.path):\(.line // .originalLine // "?")" +
+      (if .isOutdated then ", outdated" else "" end) +
+      (if .isResolved then ", resolved" else "" end) +
+      "\n  Reply to comment \(.comments.nodes[0].databaseId)\n" +
+      ([.comments.nodes[] | "  \(.author.login // "ghost"): \(.body | gsub("\r"; "") | gsub("\n"; "\n    "))"] | join("\n"))
+    ) | join("\n\n") end),
+  (if .totalCount > 100 then "Only the first 100 of \(.totalCount) threads are listed." else empty end)'
+
+gh api graphql -F owner='{owner}' -F repo='{repo}' -F pr="$pr" -f query="$query" \
+	--jq "$all as \$all | $filter" || {
+	echo "threads: cannot read the review threads of #$pr from GitHub" >&2
+	exit 1
+}
