@@ -365,6 +365,69 @@ fi
 list_threads twelve
 if [ $? -eq 2 ] && printf '%s\n' "$out" | grep -qF "usage: threads PR"; then ok; else bad "threads: usage" "$out"; fi
 
+# clean-merged-branches' report script, on a real repository. A fake gh
+# answers for merged pull requests from files named after the branch.
+report="$root/.starling/skills/clean-merged-branches/scripts/report"
+br=$tmp/branches
+br_commit() { # FILE: commit a change to FILE on the current branch
+	echo "$1" >>"$br/$1" && git -C "$br" add -A &&
+		git -C "$br" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -q -m "change $1" || exit 2
+}
+{
+	git init -q -b main "$br" && git -C "$br" config user.name Test && git -C "$br" config user.email test@example.com
+} || exit 2
+br_commit base
+git -C "$br" branch contained
+git -C "$br" checkout -q -b rebased && br_commit rebased-file
+git -C "$br" checkout -q -b unique main && br_commit unique-file
+git -C "$br" checkout -q -b squashed main && br_commit squashed-file
+git -C "$br" checkout -q -b moved main && br_commit moved-file
+git -C "$br" checkout -q -b in-tree main && br_commit in-tree-file
+git -C "$br" checkout -q -b dirty-tree main && br_commit dirty-file
+git -C "$br" checkout -q main && br_commit main-file
+git -C "$br" -c core.hooksPath=/dev/null -c commit.gpgsign=false cherry-pick rebased >/dev/null 2>&1 || exit 2
+git -C "$br" worktree add -q "$tmp/in-tree" in-tree && git -C "$br" worktree add -q "$tmp/dirty-tree" dirty-tree || exit 2
+echo change >"$tmp/dirty-tree/untracked"
+git -C "$br" branch current-one && git -C "$br" checkout -q current-one
+mkdir -p "$tmp/reportbin" "$tmp/prs" && cat >"$tmp/reportbin/gh" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+"auth status") exit 0 ;;
+"pr list") if [ -f "$FAKE_PRS/$4" ]; then cat "$FAKE_PRS/$4"; else echo null; fi ;;
+*) exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/reportbin/gh"
+echo "5 $(git -C "$br" rev-parse squashed)" >"$tmp/prs/squashed"
+echo "6 0123456789abcdef" >"$tmp/prs/moved"
+before=$(git -C "$br" for-each-ref)
+out=$(cd "$br" && PATH="$tmp/reportbin:$PATH" FAKE_PRS="$tmp/prs" && export PATH FAKE_PRS && run "$report" --base main 2>&1)
+status=$?
+if [ "$status" -eq 0 ]; then ok; else bad "report: runs" "exit $status: $out"; fi
+report_row() { # NAME BRANCH STATUS EVIDENCE
+	line=$(printf '%s\n' "$out" | awk -v b="$2" '$1 == b')
+	case $line in
+	*" $3 "*"$4"*) ok ;;
+	*) bad "report: $1" "wanted $3 and \"$4\", got: $line" ;;
+	esac
+}
+report_row "the base branch" main PROTECTED "base branch (main)"
+report_row "the current branch" current-one PROTECTED "checked out here"
+report_row "a branch in a worktree" in-tree PROTECTED "checked out in worktree"
+report_row "a worktree with changes" dirty-tree PROTECTED "uncommitted changes"
+report_row "fully contained" contained CANDIDATE "fully contained in main"
+report_row "a rebase merge" rebased CANDIDATE "patch-equivalent to main"
+report_row "commits not on the base" unique KEEP "1 commit(s) not on main"
+report_row "a squash merge at the tip" squashed CANDIDATE "merged in PR #5 at this tip"
+report_row "a merged pull request at another commit" moved KEEP "PR #6 merged at 012345678, not at this tip"
+if [ "$before" = "$(git -C "$br" for-each-ref)" ]; then ok; else bad "report: changes nothing" "refs changed"; fi
+out=$(cd "$br" && run "$report" --base main --no-github squashed nothing 2>&1)
+report_row "no pull request data" squashed KEEP "no pull request data"
+report_row "a missing branch" nothing MISSING "no such local branch"
+expect "$br" "report: an unknown base" 2 "base ref not found: nope" "$report" --base nope
+expect "$br" "report: an unknown option" 2 "usage: report" "$report" --force
+expect "$tmp" "report: outside a repository" 2 "not inside a git repository" "$report"
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then

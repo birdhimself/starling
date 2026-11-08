@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: clean-merged-branches-delete-confirmed
+description: >-
+  A branch the user confirmed is checked again and deleted with git branch
+  -d, alone, with the command to restore it.
+tags: [clean-merged-branches]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Clean up my merged branches. I already went through the list: delete
+    old-fix and nothing else, you have my confirmation for that one.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: clean-merged-branches
+- name: runs-the-report
+  type: tool_used
+  tool: Bash
+  input_match: clean-merged-branches/scripts/report
+- name: deletes-it
+  type: tool_used
+  tool: Bash
+  input_match: 'git branch\s+-d\s+old-fix'
+- name: deletes-nothing-else
+  type: tool_used
+  tool: Bash
+  input_match: 'git branch\s+-[dD]\s+(rebased-feature|wip-lobby|backup/)'
+  min: 0
+  max: 0
+- name: never-forces
+  type: tool_used
+  tool: Bash
+  input_match: 'git branch\s+-D'
+  min: 0
+  max: 0
+- name: says-how-to-restore
+  type: regex
+  pattern: 'git branch old-fix [0-9a-f]{7,}'
