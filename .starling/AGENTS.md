@@ -44,6 +44,9 @@ Starling repository.
 - History stays linear: never create merge commits. Update a branch by
   rebasing it onto the base branch; pull requests land with GitHub's rebase
   merge.
+- Pull request and issue titles are plain sentences, such as "Reject
+  expired API tokens": Conventional Commits are for commits only, and rebase
+  merges keep titles out of the history.
 - A pull request body gives a summary, how the change was validated, and
   the issues it closes (`Closes #12`). Closing keywords belong there, not in
   commits. Do not hard-wrap paragraphs in pull request or issue bodies:
