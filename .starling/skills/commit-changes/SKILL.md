@@ -72,6 +72,7 @@ new topic: fold it into that commit.
   ```
 
   If the rebase stops on a conflict, run `git rebase --abort` and report.
+
 - If the target is `pushed`, leave the `fixup!` commit so reviewers see the
   correction; it is folded before the pull request leaves draft. Fold it
   now only when the caller asks, and report that the branch then needs a
@@ -94,18 +95,18 @@ Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
 
 **Type.** Pick it by what the change does:
 
-| Type | For |
-|---|---|
-| `feat` | new behavior that users or callers can see |
-| `fix` | wrong behavior made right |
-| `perf` | faster or leaner, same behavior |
-| `refactor` | restructured code, same behavior |
-| `style` | formatting only |
-| `test` | tests only |
-| `docs` | documentation, including `AGENTS.md` and other agent instructions |
-| `build` | dependencies, lockfiles, build configuration, tooling |
-| `ci` | CI configuration |
-| `revert` | undoing an earlier commit; prefer `git revert` |
+| Type       | For                                                               |
+| ---------- | ----------------------------------------------------------------- |
+| `feat`     | new behavior that users or callers can see                        |
+| `fix`      | wrong behavior made right                                         |
+| `perf`     | faster or leaner, same behavior                                   |
+| `refactor` | restructured code, same behavior                                  |
+| `style`    | formatting only                                                   |
+| `test`     | tests only                                                        |
+| `docs`     | documentation, including `AGENTS.md` and other agent instructions |
+| `build`    | dependencies, lockfiles, build configuration, tooling             |
+| `ci`       | CI configuration                                                  |
+| `revert`   | undoing an earlier commit; prefer `git revert`                    |
 
 There is no `chore`. If no type fits, the commit mixes topics: split it.
 
@@ -188,6 +189,7 @@ checker reported, and check it with `.starling/bin/check-commit-msg`. Then:
   ```
 
   (`git commit --fixup=reword:<sha>` does the same but needs an editor.)
+
 - **A `fixup!` commit that CI rejects:** fold it as in step 3.
 
 Fixing a `pushed` commit rewrites published history: report that the branch
