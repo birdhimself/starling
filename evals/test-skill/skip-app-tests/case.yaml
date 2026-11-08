@@ -1,0 +1,25 @@
+schema_version: "1.1"
+name: test-skill-skip-app-tests
+description: >-
+  Running the project's own tests is not a reason to load the skill.
+tags: [test-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Run the tests.
+  max_turns: 10
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: test-skill
+    min: 0
+    max: 0
+  - name: runs-the-tests
+    type: tool_used
+    tool: Bash
+    input_match: 'npm\s+(run\s+)?test|node\s+--test'

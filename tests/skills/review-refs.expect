@@ -1,0 +1,7 @@
+SKILL.md:8: refers to scripts/missing, which does not exist
+SKILL.md:8: refers to references/absent.md, which does not exist
+SKILL.md:9: refers to the commit-changes skill by its path
+SKILL.md:10: names the skill no-such-skill, which does not exist
+SKILL.md:10: refers to a step of another skill by its number
+SKILL.md:11: hard-codes the repository in repos/acme/widgets
+SKILL.md:12: hard-codes the repository in -R acme/widgets

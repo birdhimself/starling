@@ -1,0 +1,25 @@
+schema_version: "1.1"
+name: test-skill-skip-code-review
+description: >-
+  Reviewing code that is not a skill is not a reason to load the skill.
+tags: [test-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Review lib/label.js for bugs.
+  max_turns: 10
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: test-skill
+    min: 0
+    max: 0
+  - name: reads-the-code
+    type: tool_used
+    tool: Read
+    input_match: label\.js
