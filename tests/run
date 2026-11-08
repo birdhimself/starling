@@ -62,10 +62,10 @@ expect "$repo" "hook: invalid message" 1 'type `chore` is not allowed' "$hook" "
 # Usage errors.
 expect "$repo" "usage: no arguments" 2 "usage:" "$check"
 
-# Every .starling/ path that Starling's instructions name exists, except
-# placeholders such as .starling/skills/<name>/ and .starling/VERSION, which
-# the installer writes.
-missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
+# Every .starling/ path that Starling's instructions and documentation name
+# exists, except placeholders such as .starling/skills/<name>/ and
+# .starling/** and .starling/VERSION, which the installer writes.
+missing=$({ find "$root/.starling" "$root/docs" -name '*.md' && echo "$root/README.md"; } | while read -r md; do
 	awk '{
 		s = $0
 		while (match(s, /`\.starling\/[^` "]*/)) {
@@ -73,11 +73,18 @@ missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
 			s = substr(s, RSTART + RLENGTH)
 		}
 	}' "$md" | while read -r path; do
-		case $path in (*'<'* | .starling/VERSION) continue ;; esac
+		case $path in (*'<'* | *'*'* | .starling/VERSION) continue ;; esac
 		[ -e "$root/$path" ] || echo "${md#"$root"/} names $path"
 	done
 done)
 if [ -z "$missing" ]; then ok; else bad "instructions: named paths exist" "$missing"; fi
+
+# The README lists every skill.
+missing=$(for dir in "$root"/.starling/skills/*/; do
+	name=$(basename "$dir")
+	grep -q "^| \`$name\`" "$root/README.md" || echo "$name"
+done)
+if [ -z "$missing" ]; then ok; else bad "readme: lists every skill" "$missing"; fi
 
 # Claude Code resolves an @ import only where the path ends the line or is
 # followed by a space: in "@.starling/AGENTS.md." the period becomes part of
