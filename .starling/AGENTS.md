@@ -55,9 +55,10 @@ Starling repository.
 ## Text you post
 
 - End every pull request, issue, comment, review or other text you post for
-  the maintainer with a line that names the agent and the model, after a
-  blank line: `🤖 Generated with Claude Code using Claude Opus 5.5`. Name
-  the model actually running; if you do not know it, name only the agent.
+  the maintainer with a line that names you, the agent, and the model you
+  run on, after a blank line: `🤖 Generated with <agent> using <model>`,
+  e.g. `🤖 Generated with Claude Code using Claude Opus 5.5`. Name the model
+  actually running; if you do not know it, name only the agent.
   When you edit such text, keep one such line. This replaces Claude Code's
   own line, which names no model and which Starling's settings turn off.
 
