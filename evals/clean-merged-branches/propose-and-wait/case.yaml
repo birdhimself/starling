@@ -1,0 +1,46 @@
+schema_version: "1.1"
+name: clean-merged-branches-propose-and-wait
+description: >-
+  Asked to clean up, the skill shows the evidence and the exact list, and
+  deletes nothing before confirmation.
+tags: [clean-merged-branches]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Clean up my merged branches.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: clean-merged-branches
+- name: runs-the-report
+  type: tool_used
+  tool: Bash
+  input_match: clean-merged-branches/scripts/report
+- name: deletes-nothing-yet
+  type: tool_used
+  tool: Bash
+  input_match: 'git branch\s+(-[dD]|--delete)'
+  min: 0
+  max: 0
+- name: deletes-nothing-remote
+  type: tool_used
+  tool: Bash
+  input_match: 'git push.*(--delete|:refs)'
+  min: 0
+  max: 0
+- name: proposes-and-asks
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it proposes deleting old-fix
+    and rebased-feature, each with its tip and evidence, says that
+    wip-lobby and backup/pre-squash stay because their commits are not
+    on main, and asks for confirmation before deleting anything. FAIL if
+    it deleted anything, proposes deleting wip-lobby or
+    backup/pre-squash, or leaves backup/pre-squash unmentioned.

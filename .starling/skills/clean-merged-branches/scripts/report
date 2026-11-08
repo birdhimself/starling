@@ -1,0 +1,156 @@
+#!/bin/sh
+# Starling: classify local branches for deletion.
+#
+#   report [--base REF] [--no-github] [BRANCH...]
+#
+# Prints a table of local branches, or of the BRANCHes given, with each
+# one's status, tip and the evidence for it. It only reads: it never deletes,
+# writes or fetches.
+#
+#   --base REF    compare against REF; by default origin/HEAD, else main
+#   --no-github   skip the lookup of merged pull requests
+#
+# Status:
+#   PROTECTED  the base branch, the current branch, or a branch checked out
+#              in a worktree
+#   CANDIDATE  every commit is on the base branch, by patch equivalence, which
+#              finds rebase merges, or the branch's tip is the head of a
+#              merged pull request, which finds squash merges
+#   KEEP       anything else, including anything that could not be proven
+#   MISSING    no such local branch
+#
+# Exit status: 0, or 2 for a usage error, outside a repository, or an unknown
+# base.
+
+set -u
+
+usage() {
+	echo "usage: report [--base REF] [--no-github] [BRANCH...]" >&2
+	exit 2
+}
+base=
+use_github=1
+selected=
+while [ $# -gt 0 ]; do
+	case $1 in
+	--base)
+		[ $# -ge 2 ] || usage
+		base=$2
+		shift 2
+		;;
+	--no-github)
+		use_github=
+		shift
+		;;
+	-*) usage ;;
+	*)
+		selected="$selected$1
+"
+		shift
+		;;
+	esac
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 || {
+	echo "report: not inside a git repository" >&2
+	exit 2
+}
+if [ -z "$base" ]; then
+	base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || base=main
+fi
+git rev-parse -q --verify "$base^{commit}" >/dev/null || {
+	echo "report: base ref not found: $base" >&2
+	exit 2
+}
+
+# The local branch the base stands for, so that origin/main protects main.
+base_local=${base#origin/}
+current=$(git symbolic-ref -q --short HEAD) || current=
+
+# Every branch checked out in a worktree, as "branch<TAB>path" lines.
+worktrees=$(git worktree list --porcelain | awk '
+	/^worktree / { path = substr($0, 10) }
+	/^branch refs\/heads\// { print substr($0, 19) "\t" path }')
+
+have_github=
+if [ -n "$use_github" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+	have_github=1
+fi
+
+[ -n "$selected" ] || selected=$(git for-each-ref --format='%(refname:short)' refs/heads/)
+
+row() { # BRANCH STATUS TIP EVIDENCE
+	printf '%-42s %-10s %-9s %s\n' "$1" "$2" "$3" "$4"
+}
+row BRANCH STATUS TIP EVIDENCE
+row ------------------------------------------ ---------- --------- --------
+
+while IFS= read -r branch; do
+	[ -n "$branch" ] || continue
+	if ! tip=$(git rev-parse -q --verify "refs/heads/$branch"); then
+		row "$branch" MISSING - "no such local branch"
+		continue
+	fi
+	short=$(printf '%.9s' "$tip")
+
+	# Protections come first; no merge evidence overrides them.
+	if [ "$branch" = "$base_local" ]; then
+		row "$branch" PROTECTED "$short" "base branch ($base)"
+		continue
+	fi
+	if [ "$branch" = "$current" ]; then
+		row "$branch" PROTECTED "$short" "checked out here"
+		continue
+	fi
+	path=$(printf '%s\n' "$worktrees" | awk -F '\t' -v b="$branch" '$1 == b { print $2; exit }')
+	if [ -n "$path" ]; then
+		dirty=
+		[ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] || dirty=", uncommitted changes"
+		row "$branch" PROTECTED "$short" "checked out in worktree $path$dirty"
+		continue
+	fi
+
+	# A failed comparison must not read as "nothing unique".
+	if ! ahead=$(git rev-list --count "$base..$branch") || ! cherry=$(git cherry "$base" "$branch"); then
+		row "$branch" KEEP "$short" "could not compare with $base"
+		continue
+	fi
+	# git cherry marks a commit - when an equivalent patch is on the base and
+	# + when none is, so no + line means the whole branch is represented.
+	unique=$(printf '%s\n' "$cherry" | grep -c '^+')
+
+	# A merged pull request proves the branch only at the commit that merged:
+	# the name may have been reused, or commits added since.
+	pr= pr_head=
+	if [ -n "$have_github" ]; then
+		merged=$(gh pr list --head "$branch" --state merged --limit 1 --json number,headRefOid \
+			--jq '.[0] | "\(.number) \(.headRefOid)"' 2>/dev/null) || merged=
+		case $merged in
+		'' | null*) ;;
+		*)
+			pr=${merged%% *}
+			pr_head=${merged#* }
+			;;
+		esac
+	fi
+
+	if [ "$unique" -eq 0 ]; then
+		if [ "$ahead" -eq 0 ]; then
+			evidence="fully contained in $base"
+		else
+			evidence="all $ahead commit(s) patch-equivalent to $base"
+		fi
+		[ -z "$pr" ] || evidence="$evidence; merged in PR #$pr"
+		row "$branch" CANDIDATE "$short" "$evidence"
+	elif [ -n "$pr" ] && [ "$pr_head" = "$tip" ]; then
+		row "$branch" CANDIDATE "$short" "merged in PR #$pr at this tip; $unique commit(s) not patch-equivalent (squash merge)"
+	elif [ -n "$pr" ]; then
+		row "$branch" KEEP "$short" "$unique commit(s) not on $base; PR #$pr merged at $(printf '%.9s' "$pr_head"), not at this tip"
+	elif [ -z "$have_github" ]; then
+		row "$branch" KEEP "$short" "$unique commit(s) not on $base; no pull request data"
+	else
+		row "$branch" KEEP "$short" "$unique commit(s) not on $base"
+	fi
+done <<EOF
+$selected
+EOF
