@@ -1,0 +1,30 @@
+schema_version: "1.1"
+name: write-skill-skip-checking
+description: >-
+  Checking a skill without changing it is test-skill's, not write-skill's.
+tags: [write-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Check whether the review-labels skill follows the rules for skills.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: write-skill
+    min: 0
+    max: 0
+  - name: uses-test-skill
+    type: tool_used
+    tool: Skill
+    input_match: test-skill
+  - name: never-edits
+    type: tool_used
+    tool: Edit
+    min: 0
+    max: 0

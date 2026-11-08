@@ -1,0 +1,112 @@
+#!/bin/sh
+# Starling: print the facts the write-skill skill works from.
+#
+#   context
+#
+# Prints whether this is Starling's own repository or one with Starling
+# installed, where the repository's own skills go, whether it has an eval
+# setup, and every skill with where it lives and its description, so that
+# a new skill's name and triggers can be compared with the others'. Notes
+# skills that are not where the rules put them. Run it anywhere inside the
+# repository.
+#
+# Exit status: 0, or 2 outside a work tree.
+
+set -u
+LC_ALL=C
+export LC_ALL
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "context: not inside a git work tree" >&2
+	exit 2
+}
+cd "$top" || exit 2
+
+if [ -d .starling/skills ] && [ ! -f .starling/VERSION ]; then
+	echo "Repository: Starling itself"
+	echo "New skills go in: .starling/skills/<name>/, linked from .claude/skills/<name> and .agents/skills/<name> as ../../.starling/skills/<name>"
+	own=.starling/skills
+else
+	if [ -f .starling/VERSION ]; then
+		echo "Repository: a project with Starling $(cat .starling/VERSION)"
+	else
+		echo "Repository: a project without Starling"
+	fi
+	echo "New skills go in: .agents/skills/<name>/, linked from .claude/skills/<name> as ../../.agents/skills/<name>"
+	own=.agents/skills
+fi
+
+# The eval setup: a plugin manifest whose skills path the runner loads.
+if [ -f .claude-plugin/plugin.json ]; then
+	path=$(sed -n 's/.*"skills"[ \t]*:[ \t]*"\([^"]*\)".*/\1/p' .claude-plugin/plugin.json | head -n 1)
+	echo "Eval setup: .claude-plugin/plugin.json loads ${path:-no skills directory}; cases in evals/<skill>/"
+	case ${path#./} in
+	"$own" | "$own/") ;;
+	*) echo "  Note: the manifest does not load $own, where this repository's skills go" ;;
+	esac
+else
+	echo "Eval setup: none"
+fi
+
+# describe FILE: the description from a SKILL.md's frontmatter, on one line.
+describe() {
+	awk '
+		NR == 1 { if ($0 != "---") exit; next }
+		$0 == "---" { exit }
+		/^[A-Za-z0-9_-]+:/ {
+			inside = ($0 ~ /^description:/)
+			if (inside) {
+				v = $0
+				sub(/^description:[ \t]*/, "", v)
+				if (v ~ /^[>|][-+]?[ \t]*$/) v = ""
+				else if (v ~ /^".*"[ \t]*$/ || v ~ /^\047.*\047[ \t]*$/) {
+					sub(/[ \t]*$/, "", v)
+					v = substr(v, 2, length(v) - 2)
+				}
+				d = v
+			}
+			next
+		}
+		inside && /^[ \t]/ {
+			v = $0
+			sub(/^[ \t]+/, "", v)
+			d = (d == "") ? v : d " " v
+		}
+		END { print (d == "" ? "(no description)" : d) }
+	' "$1"
+}
+
+echo "Skills:"
+listed=' '
+any=
+for base in .starling/skills .agents/skills .claude/skills; do
+	for entry in "$base"/*; do
+		[ -e "$entry" ] || [ -L "$entry" ] || continue
+		name=$(basename "$entry")
+		if [ -L "$entry" ]; then
+			[ -e "$entry" ] || echo "  $name: the link $entry is broken; remove it"
+			continue
+		fi
+		[ -f "$entry/SKILL.md" ] || continue
+		case $listed in *" $name "*) ;; *)
+			listed="$listed$name "
+			any=1
+			case $base in
+			.starling/skills) [ "$own" = .starling/skills ] && where="Starling's own" || where=Starling ;;
+			*) where=$base ;;
+			esac
+			echo "  $name ($where): $(describe "$entry/SKILL.md")"
+			;;
+		esac
+		case $base in
+		.claude/skills)
+			echo "    Note: a real directory in .claude/skills; move it to .agents/skills and link it when it next changes"
+			;;
+		.agents/skills)
+			[ "$(cd ".claude/skills/$name" 2>/dev/null && pwd -P)" = "$(cd "$entry" && pwd -P)" ] ||
+				echo "    Note: not linked from .claude/skills/$name, so Claude Code does not load it"
+			;;
+		esac
+	done
+done
+[ -n "$any" ] || echo "  none"

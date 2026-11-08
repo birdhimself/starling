@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: write-skill-skip-starling-skill
+description: >-
+  A change to one of Starling's skills from a project is not made there:
+  .starling/ is replaced on every update.
+tags: [write-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Make the commit-changes skill push the branch after committing.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: write-skill
+    min: 0
+    max: 0
+  - name: leaves-starling-alone-with-edit
+    type: tool_used
+    tool: Edit
+    input_match: '"file_path":\s*"[^"]*/\.starling/'
+    min: 0
+    max: 0
+  - name: leaves-starling-alone-with-write
+    type: tool_used
+    tool: Write
+    input_match: '"file_path":\s*"[^"]*/\.starling/'
+    min: 0
+    max: 0
+  - name: points-to-starling
+    type: llm
+    focus: trace
+    criteria: >-
+      Read the agent's last message. PASS if it explains that the
+      commit-changes skill belongs to Starling, whose files in .starling/
+      are replaced on every update, so the change has to be made in the
+      Starling repository, and it did not change the skill here. FAIL if
+      it changed files in .starling/ or does not say where the change
+      belongs.

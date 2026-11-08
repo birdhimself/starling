@@ -1,6 +1,6 @@
 ---
 name: test-skill
-description: Checks skills against Starling's rules for skills and reports what breaks them, without changing anything. It lints names, descriptions, paths, scripts and reference files, validates the skills with Claude Code, and runs their eval cases when the user agrees. Use when asked to test, lint, check or validate a skill or the repository's skills, or when a skill was just created or changed. Do not use for creating, changing or fixing a skill, for reviewing code that is not a skill, or for testing the application itself.
+description: Checks skills against Starling's rules for skills and reports what breaks them, without changing anything. It lints names, descriptions, paths, scripts and reference files, validates the skills with Claude Code, and runs their eval cases when the user agrees. Use when asked to test, lint, check or validate a skill or the repository's skills, or when a skill was just created or changed. Do not use for creating, changing or fixing a skill (use `write-skill`), for reviewing code that is not a skill, or for testing the application itself.
 ---
 
 # Test a skill

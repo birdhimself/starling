@@ -1,0 +1,82 @@
+schema_version: "1.1"
+name: write-skill-new-project-skill
+description: >-
+  A new project skill lands in .agents/skills with a link from
+  .claude/skills, follows the rules, passes the lint, and the report lists
+  the eval cases it would write since the project has no eval setup.
+tags: [write-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Create a skill for this project that reviews how widget labels are formatted and reports labels that read wrong, such as "1 widgets", without changing any code. Call it review-labels. Don't set up evals for it.
+  max_turns: 60
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: write-skill
+  - name: runs-the-context
+    type: tool_used
+    tool: Bash
+    input_match: write-skill/scripts/context
+  - name: writes-the-skill-in-agents-skills
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: '^name: review-labels$'
+    flags: m
+  - name: says-when-to-use-it
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: Use when
+  - name: says-when-not-to
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: Do not use for
+  - name: states-its-contract
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: '## Contract'
+  - name: links-it-for-claude-code
+    type: regex
+    target: trace
+    pattern: 'ln -s\S* \.\./\.\./\.agents/skills/review-labels'
+  - name: runs-the-lint
+    type: tool_used
+    tool: Bash
+    input_match: test-skill/scripts/lint
+  - name: leaves-starling-alone
+    type: tool_used
+    tool: Write
+    input_match: '"file_path":\s*"[^"]*/\.starling/'
+    min: 0
+    max: 0
+  - name: sets-up-no-evals
+    type: tool_used
+    tool: Write
+    input_match: plugin\.json
+    min: 0
+    max: 0
+  - name: runs-no-evals
+    type: tool_used
+    tool: Bash
+    input_match: plugin\s+eval
+    min: 0
+    max: 0
+  - name: never-commits
+    type: tool_used
+    tool: Bash
+    input_match: git\s+commit
+    min: 0
+    max: 0
+  - name: lists-the-cases-it-would-write
+    type: llm
+    focus: trace
+    criteria: >-
+      Read the agent's last message. PASS if it lists eval cases it would
+      write for the review-labels skill, including at least one in which
+      the skill must not run, without claiming that it set up evals or
+      wrote case files. FAIL if it lists no cases or says it set up evals.
