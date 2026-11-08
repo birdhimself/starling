@@ -14,7 +14,8 @@
 #   - copies .starling/workflows/*.yml into .github/workflows/, with the
 #     default branch in place of main, and removes Starling workflows that
 #     are gone
-#   - adds .starling/ to .prettierignore in a project that uses Prettier
+#   - adds .starling/ to .prettierignore in a project that uses Prettier,
+#     and prints the rule that keeps Renovate off Starling's files
 #   - creates .claude/settings.json from .starling/claude-settings.json, or
 #     merges Starling's entries into it with jq
 #   - activates Starling's git hooks
@@ -131,6 +132,22 @@ if [ -n "$prettier" ] && ! grep -Eqs '^/?\.starling(/(\*\*)?)?[[:space:]]*$' .pr
 	fi
 	printf '%s\n' "# Starling's files are managed by Starling and replaced on every update." \
 		.starling/ >>.prettierignore
+fi
+
+# Renovate. Starling bumps the actions it pins, and every update replaces
+# .starling/ and the workflows it installs, so Renovate should propose no
+# changes there. sh and awk cannot edit JSON5 safely: print the rule.
+renovate=
+for f in renovate.json renovate.json5 .github/renovate.json .github/renovate.json5 \
+	.gitlab/renovate.json .gitlab/renovate.json5 .renovaterc .renovaterc.json .renovaterc.json5; do
+	[ -f "$f" ] && renovate=$f && break
+done
+[ -n "$renovate" ] || [ ! -f package.json ] || ! grep -q '"renovate"[[:space:]]*:' package.json ||
+	renovate=package.json
+rule='{"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "enabled": false}'
+if [ -n "$renovate" ] && ! grep -qF '.github/workflows/starling-' "$renovate"; then
+	note "Renovate is set up in $renovate. Starling updates the actions it pins and replaces its files on every update, so add this rule to the packageRules there:
+  $rule"
 fi
 
 # Claude Code settings. Starling owns its attribution keys and every hook
