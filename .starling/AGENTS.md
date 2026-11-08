@@ -76,3 +76,6 @@ Starling repository.
   and check one with the `test-skill` skill. A repository's own skills
   live in `.agents/skills/<name>/`, where Codex finds them, linked from
   `.claude/skills/<name>` for Claude Code.
+- A repository adapts one of Starling's skills to itself in
+  `.agents/policy/<skill>.md`, which that skill reads, never by copying
+  or editing the skill.
