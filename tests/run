@@ -221,6 +221,16 @@ expect "$tmp/act" "activate: leaves another hooks path" 1 "core.hooksPath is
 if [ "$(git -C "$tmp/act" config core.hooksPath)" = .husky/_ ]; then ok; else
 	bad "activate: other path unchanged" "core.hooksPath is '$(git -C "$tmp/act" config core.hooksPath)'"
 fi
+# The note's last line is the fix: unset the path, then activate. Run it
+# with this tree's activate-hooks, since $tmp/act has only .starling/hooks.
+fix=$(cd "$tmp/act" && run "$act" | tail -n 1)
+want='  git config --unset core.hooksPath && .starling/bin/activate-hooks'
+if [ "$fix" = "$want" ]; then ok; else bad "activate: note ends with the fix" "got: $fix"; fi
+fix=$(printf '%s\n' "$fix" | sed "s|\.starling/bin/activate-hooks\$|run \"$act\"|")
+out=$(cd "$tmp/act" && eval "$fix" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ] && [ "$(git -C "$tmp/act" config core.hooksPath)" = .starling/hooks ]; then ok; else
+	bad "activate: the note's fix works" "status or path wrong: $out; core.hooksPath is '$(git -C "$tmp/act" config core.hooksPath)'"
+fi
 expect "$tmp/repo" "activate: without Starling" 2 "" "$act"
 
 # Starling's hooks run the repository's own hooks in .githooks/.
