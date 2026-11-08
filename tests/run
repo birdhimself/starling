@@ -236,7 +236,10 @@ out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 13 2>&1)
 if [ "$(printf '%s\n' "$out" | grep -c '^  none$')" = 4 ]; then ok; else
 	bad "relations: an issue without any" "$out"
 fi
-PATH="$tmp/fakebin:$PATH" expect "$repo" "relations: GitHub fails" 1 'cannot read "Blocked by" for #99' "$relations" 99
+out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 99 2>&1)
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF 'cannot read "Blocked by" for #99'; then ok; else
+	bad "relations: GitHub fails" "$out"
+fi
 expect "$repo" "relations: usage" 2 "usage: relations ISSUE" "$relations" twelve
 
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
