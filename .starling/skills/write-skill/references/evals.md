@@ -79,12 +79,16 @@ check, such as whether a commit body explains the cause.
 
 - `tool_used`: a tool was called, with `input_match` (a regular expression
   on the call's input), `min` and `max`. `min: 0, max: 0` means never.
-- `regex`: a `pattern` on the agent's last message, or on a file with
+- `regex`: a `pattern` on the agent's last message, on the whole run with
+  `target: trace`, or on a file with
   `target: {source: file, path: <path>}`. `match` is `contains` (the
   default), `not_contains` or `count:<n>`; `flags: m` or `i` as needed.
 - `llm`: a judge reads the run, with `focus: trace`, and votes three times
   on `criteria`. Write criteria that say exactly what passes and what
   fails. The `test-skill` skill runs judges on Sonnet.
+  A long trace reaches the judge with its middle cut out, so a judge can
+  miss what happened halfway through a run: grade that with a `regex` on
+  the trace, and keep judges for the start and the end of a run.
 
 The runner turns off every git hook, and graders cannot run commands after
 a run. Grade what git and the agent leave behind: `.git/logs/HEAD` has a
