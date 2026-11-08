@@ -356,6 +356,32 @@ assert "install: AGENTS.md created" [ "$(cat "$plain/AGENTS.md")" = "# plain
 
 $import" ]
 assert "install: settings created" cmp -s "$plain/.claude/settings.json" "$plain/.starling/claude-settings.json"
+assert "install: no .prettierignore without Prettier" gone "$plain/.prettierignore"
+
+# A target that uses Prettier, with an ignore file that does not end in a
+# newline and settings on one line, which jq rewrites.
+fmt=$tmp/fmt
+{
+	git init -q "$fmt" && printf '{"devDependencies": {"prettier": "3.9.10"}}\n' >"$fmt/package.json" &&
+		printf 'dist/' >"$fmt/.prettierignore" && mkdir "$fmt/.claude" &&
+		echo '{"model": "opus"}' >"$fmt/.claude/settings.json" && commit_all "$fmt" "docs: start"
+} || exit 2
+expect "$fmt" "install: with Prettier" 0 "M .prettierignore" "$root/install"
+assert "install: Prettier ignores .starling/" [ "$(cat "$fmt/.prettierignore")" = "dist/
+
+# Starling's files are managed by Starling and replaced on every update.
+.starling/" ]
+if [ "$has_jq" = 1 ]; then
+	if printf '%s\n' "$out" | grep -qF "run Prettier on it"; then ok; else
+		bad "install: note on the settings jq rewrote" "$out"
+	fi
+fi
+commit_all "$fmt" "build: install Starling v0.2.0"
+expect "$fmt" "update: with Prettier" 0 "Reinstalled Starling v0.2.0" .starling/bin/update
+assert "update: .starling/ ignored once" [ "$(grep -c '^\.starling/$' "$fmt/.prettierignore")" = 1 ]
+if printf '%s\n' "$out" | grep -qF "run Prettier on it"; then
+	bad "update: no settings note when jq changes nothing" "$out"
+else ok; fi
 
 # A target where husky owns the hooks, AGENTS.md has no heading, a project
 # skill has Starling's skill name and jq is missing.

@@ -14,6 +14,7 @@
 #   - copies .starling/workflows/*.yml into .github/workflows/, with the
 #     default branch in place of main, and removes Starling workflows that
 #     are gone
+#   - adds .starling/ to .prettierignore in a project that uses Prettier
 #   - creates .claude/settings.json from .starling/claude-settings.json, or
 #     merges Starling's entries into it with jq
 #   - activates Starling's git hooks
@@ -116,6 +117,22 @@ for wf in .starling/workflows/*.yml; do
 done
 [ "$branch" = main ] || note "The workflows run on pushes to $branch, this repository's default branch."
 
+# Prettier. Every update replaces .starling/, so a project that formats its
+# tree must leave it alone; Prettier reads .prettierignore.
+prettier=
+for f in .prettierrc .prettierrc.* prettier.config.* .prettierignore; do
+	[ ! -e "$f" ] || prettier=1
+done
+[ ! -f package.json ] || ! grep -q '"prettier"' package.json || prettier=1
+if [ -n "$prettier" ] && ! grep -Eqs '^/?\.starling(/(\*\*)?)?[[:space:]]*$' .prettierignore; then
+	if [ -s .prettierignore ]; then
+		[ -z "$(tail -c 1 .prettierignore)" ] || echo >>.prettierignore
+		echo >>.prettierignore
+	fi
+	printf '%s\n' "# Starling's files are managed by Starling and replaced on every update." \
+		.starling/ >>.prettierignore
+fi
+
 # Claude Code settings. Starling owns its attribution keys and every hook
 # command under .starling/bin/; the project's other settings stay.
 jq=${STARLING_JQ:-jq}
@@ -132,7 +149,11 @@ if [ ! -e .claude/settings.json ]; then
 	cp .starling/claude-settings.json .claude/settings.json
 elif command -v "$jq" >/dev/null 2>&1 &&
 	merged=$("$jq" --slurpfile s .starling/claude-settings.json "$filter" .claude/settings.json); then
-	printf '%s\n' "$merged" >.claude/settings.json
+	if [ "$merged" != "$(cat .claude/settings.json)" ]; then
+		printf '%s\n' "$merged" >.claude/settings.json
+		[ -z "$prettier" ] ||
+			note "jq rewrote .claude/settings.json to merge Starling's entries. If Prettier formats it, run Prettier on it before committing."
+	fi
 else
 	note "Merge .starling/claude-settings.json into .claude/settings.json by hand (jq is missing or could not read the file): Starling's attribution keys, and its hooks in place of any hook commands under .starling/bin/."
 fi
@@ -156,7 +177,7 @@ else
 	echo "Updated Starling from $old to $version."
 	header="build: update Starling to $version"
 fi
-changes=$(git status --short -- .starling AGENTS.md CLAUDE.md .claude .agents .github/workflows)
+changes=$(git status --short -- .starling AGENTS.md CLAUDE.md .claude .agents .github/workflows .prettierignore)
 if [ -z "$changes" ]; then
 	echo "Nothing changed."
 else
