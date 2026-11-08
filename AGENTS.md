@@ -19,6 +19,9 @@ and must never be copied into this repository.
 - Every skill in `.starling/skills/` is linked from `.claude/skills/<name>`
   and `.agents/skills/<name>`, as the installer links it elsewhere, so this
   repository uses its own skills. A test checks the links.
+- Write and change skills with the `write-skill` skill: its
+  `references/rules.md` holds the rules for skills, and the lint of the
+  `test-skill` skill checks the mechanical ones, also in `sh tests/run`.
 - Scripts use only POSIX `sh`, POSIX `awk` and git, and no temporary files.
 - Run the tests with `sh tests/run`.
 
@@ -36,7 +39,8 @@ Each skill has eval cases in `evals/<skill>/`, run by `claude plugin eval`.
 `.claude-plugin/plugin.json` exists only so that the eval runner loads
 `.starling/skills` as a plugin. Run a skill's evals after changing it, and
 every skill's "does-not-use-the-skill" cases after changing any skill's
-description, because descriptions compete:
+description, because descriptions compete. The `test-skill` skill runs
+them, after asking; by hand:
 
 ```sh
 claude plugin eval . --tag commit-changes -j 3 --scaffold \
@@ -44,8 +48,9 @@ claude plugin eval . --tag commit-changes -j 3 --scaffold \
   --trust-plugin --no-publish --judge-model sonnet --max-cost-usd 10
 ```
 
-- Runs cost money: about $5 for the nine `commit-changes` cases at three
-  runs each. Pilot a new or changed case with `--case <name> --runs 1`.
+- The runner reports the cost at API prices: about $5 for the nine
+  `commit-changes` cases at three runs each. Pilot a new or changed case
+  with `--case <name> --runs 1`.
 - The runner turns off git hooks and graders cannot run commands, so cases
   grade what git writes itself: `.git/logs/HEAD` and `.git/COMMIT_EDITMSG`.
 - On macOS, the runner's sandbox cannot use Apple's `/usr/bin/git`, which
