@@ -137,6 +137,7 @@ No skill merges a pull request.
 | `refine-draft-issues`    | Turns a rough issue into scope, acceptance criteria and validation.          | Updated issue                   |
 | `triage-issue`           | Sets an issue's type, labels, fields and relationships.                      | Metadata set                    |
 | `commit-changes`         | Commits one topic at a time, with messages that pass the check.              | Local commits, never pushed     |
+| `open-pr`                | Checks a finished branch, fills in the template and opens a pull request.    | Draft pull request              |
 | `apply-review-findings`  | Checks review findings against the code and applies the ones that hold.      | Folded, pushed commits          |
 | `resolve-review-threads` | Answers every unresolved review thread, changing code where a remark holds.  | Threads replied to and resolved |
 | `finish-pr`              | Folds fixups, rebases, waits for CI and marks the pull request ready.        | Ready pull request              |

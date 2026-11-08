@@ -1,0 +1,55 @@
+schema_version: "1.1"
+name: open-pr-no-template
+description: >-
+  Without a template, the body gives a summary, the validation that ran and the issue, as the shared rules ask.
+tags: [open-pr]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Please open a PR for my branch, it is ready.
+  max_turns: 40
+  timeout_seconds: 900
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: open-pr
+- name: runs-the-tests
+  type: tool_used
+  tool: Bash
+  input_match: 'npm (run )?test|node --test'
+- name: pushes-the-branch
+  type: tool_used
+  tool: Bash
+  input_match: 'git push'
+- name: creates-a-draft
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr create[^|;&]*--draft'
+- name: never-marks-ready
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr ready'
+  min: 0
+  max: 0
+- name: never-merges
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr merge|git merge(?!-)'
+  min: 0
+  max: 0
+- name: names-the-issue
+  type: regex
+  target: trace
+  pattern: '(Closes|Refs) #12'
+- name: reports-the-validation
+  type: regex
+  target: trace
+  pattern: 'Validation.{0,300}npm test'
+- name: ends-with-the-generated-line
+  type: regex
+  target: trace
+  pattern: 'Generated with [^<\\]*\\n+([A-Z_]+(\\n|\\")|\\")'

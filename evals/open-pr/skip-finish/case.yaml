@@ -1,0 +1,21 @@
+schema_version: "1.1"
+name: open-pr-skip-finish
+description: >-
+  Marking a pull request ready and watching CI belongs to finish-pr.
+tags: [open-pr]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Get pull request #7 green and mark it ready once CI passes.
+  max_turns: 10
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: does-not-use-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: open-pr
+  min: 0
+  max: 0

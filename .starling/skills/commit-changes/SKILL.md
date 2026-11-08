@@ -1,6 +1,6 @@
 ---
 name: commit-changes
-description: Commits the changes in the working tree as Conventional Commits that pass Starling's commit check, one topic per commit, with a body that explains why and the right trailers, and folds fixes into the commits they correct. Use when asked to commit, when finished work should be committed, or when the commit-msg hook or the CI commit check rejects a message. Ends at local commits and never pushes. Do not use for pushing a branch, opening or updating a pull request, or changing commits already on the default branch.
+description: Commits the changes in the working tree as Conventional Commits that pass Starling's commit check, one topic per commit, with a body that explains why and the right trailers, and folds fixes into the commits they correct. Use when asked to commit, when finished work should be committed, or when the commit-msg hook or the CI commit check rejects a message. Ends at local commits and never pushes. Do not use for pushing a branch, for opening or updating a pull request (use `open-pr`), or for changing commits already on the default branch.
 ---
 
 # Commit changes

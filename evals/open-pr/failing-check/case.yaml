@@ -1,0 +1,47 @@
+schema_version: "1.1"
+name: open-pr-failing-check
+description: >-
+  A failing test stops the skill before it pushes, and it does not change the code to pass.
+tags: [open-pr]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    The work on this branch is done, open a pull request.
+  max_turns: 25
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: open-pr
+- name: runs-the-tests
+  type: tool_used
+  tool: Bash
+  input_match: 'npm (run )?test|node --test'
+- name: never-pushes
+  type: tool_used
+  tool: Bash
+  input_match: 'git push'
+  min: 0
+  max: 0
+- name: never-creates-a-pull-request
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr create'
+  min: 0
+  max: 0
+- name: never-edits-the-work
+  type: tool_used
+  tool: Edit
+  min: 0
+  max: 0
+- name: reports-the-failure
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it says a test fails and that
+    no pull request was opened. FAIL if it says the pull request was
+    opened or does not mention the failing test.
