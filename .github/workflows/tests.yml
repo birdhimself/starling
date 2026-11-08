@@ -78,6 +78,24 @@ jobs:
       - name: Check the payload's formatting
         run: npx --yes prettier@3.9.10 --check .starling
 
+  # Claude Code's validator reads the skills as Claude Code loads them. It
+  # needs no login. Pinned, so that a new release cannot fail the tests on
+  # its own.
+  skills:
+    name: Claude Code validates the skills
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the skills
+        env:
+          npm_config_update_notifier: "false"
+        run: npx --yes @anthropic-ai/claude-code@2.1.319 plugin validate .starling/skills --strict
+
   # macOS: its sh and the BSD awk.
   macos:
     name: macOS sh with BSD awk
