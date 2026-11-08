@@ -22,6 +22,14 @@ and must never be copied into this repository.
 - Scripts use only POSIX `sh`, POSIX `awk` and git, and no temporary files.
 - Run the tests with `sh tests/run`.
 
+## Releases
+
+`install` and `.starling/bin/update` install the newest `vX.Y.Z` tag, so a
+change reaches other repositories only once it is tagged. Tag `main` after
+merging what a release should contain; tags are the maintainer's call. A
+repository moves to it with `.starling/bin/update`, or to a given version
+with `.starling/bin/update vX.Y.Z`.
+
 ## Evals
 
 Each skill has eval cases in `evals/<skill>/`, run by `claude plugin eval`.
