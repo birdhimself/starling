@@ -5,10 +5,11 @@
 #
 # Prints whether this is Starling's own repository or one with Starling
 # installed, where the repository's own skills go, whether it has an eval
-# setup, and every skill with where it lives and its description, so that
-# a new skill's name and triggers can be compared with the others'. Notes
-# skills that are not where the rules put them. Run it anywhere inside the
-# repository.
+# setup, every skill with where it lives and its description, so that a
+# new skill's name and triggers can be compared with the others', and the
+# policy files in .agents/policy/. Notes skills that are not where the
+# rules put them and policy files that name no skill. Run it anywhere
+# inside the repository.
 #
 # Exit status: 0, or 2 outside a work tree.
 
@@ -108,5 +109,19 @@ for base in .starling/skills .agents/skills .claude/skills; do
 			;;
 		esac
 	done
+done
+[ -n "$any" ] || echo "  none"
+
+# Policy files: what a repository adds to one of Starling's skills.
+echo "Policy files:"
+any=
+for file in .agents/policy/*.md; do
+	[ -f "$file" ] || continue
+	any=1
+	name=$(basename "$file" .md)
+	case $listed in
+	*" $name "*) echo "  $file" ;;
+	*) echo "  $file: no skill is named $name; rename or remove it" ;;
+	esac
 done
 [ -n "$any" ] || echo "  none"
