@@ -17,7 +17,12 @@
 #     [commit]
 #         scopes = client server deps
 #
-# Without that list, headers take no scope.
+# Without that list, headers take no scope. A repository whose scopes cover
+# every file can require one in every header:
+#
+#     [commit]
+#         scopes = client server docs repo
+#         requireScope = true
 #
 # Exit status: 0 every message passes, 1 a message breaks a rule, 2 usage or
 # an unreadable .starling.conf.
@@ -39,9 +44,11 @@ top=$(git rev-parse --show-toplevel 2>/dev/null) || top=
 hint="Commit conventions: ${starling_dir#"$top"/}/skills/commit-changes/SKILL.md
 Agents: write commit messages with the commit-changes skill."
 
-# The scopes this repository allows, from .starling.conf. git config exits 1
-# when the key is unset, and higher when it cannot read the file.
+# The scopes this repository allows, and whether a header must have one,
+# from .starling.conf. git config exits 1 when a key is unset, and higher when
+# it cannot read the file or the value.
 scopes=
+require=false
 conf=${top:+$top/.starling.conf}
 if [ -n "$conf" ] && [ -f "$conf" ]; then
 	scopes=$(git config --file "$conf" --get-all commit.scopes)
@@ -53,6 +60,19 @@ if [ -n "$conf" ] && [ -f "$conf" ]; then
 		;;
 	esac
 	scopes=$(printf '%s\n' "$scopes" | tr '\n' ' ')
+	require=$(git config --file "$conf" --bool --get commit.requireScope 2>/dev/null)
+	case $? in
+	0) ;;
+	1) require=false ;;
+	*)
+		echo "check-commit-msg: commit.requireScope in $conf must be true or false" >&2
+		exit 2
+		;;
+	esac
+	if [ "$require" = true ] && [ -z "${scopes% }" ]; then
+		echo "check-commit-msg: $conf sets commit.requireScope but lists no commit.scopes" >&2
+		exit 2
+	fi
 fi
 
 rules='
@@ -93,6 +113,8 @@ END {
 			unscoped = header; sub(/\([^()]*\)/, "", unscoped)
 			if (nscopes == 0) err(1, "this repository defines no scopes; drop `(" scope ")`: `" unscoped "`")
 			else if (!(scope in scope_ok)) err(1, "unknown scope `" scope "`; this repository allows: " scopes_list)
+		} else if (requirescope == "true") {
+			err(1, "this repository requires a scope, one of: " scopes_list "; e.g. `" type "(" sl[1] "): ...`")
 		}
 		desc = header; sub(/^[^:]*: /, "", desc)
 		if (desc ~ /^[ \t]*$/) err(1, "the description after `: ` is empty")
@@ -154,7 +176,7 @@ END {
 check() {
 	trailers=$(printf '%s\n' "$1" | git interpret-trailers --parse | grep -c .)
 	printf '%s\n' "$1" |
-		LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" -v scopes="$scopes" "$rules"
+		LC_ALL=C awk -v ntrailers="$trailers" -v rejectfixups="${2:-0}" -v scopes="$scopes" -v requirescope="$require" "$rules"
 }
 
 if [ "${1:-}" != "--range" ]; then

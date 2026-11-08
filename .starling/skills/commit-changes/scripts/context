@@ -32,7 +32,9 @@ if [ -f .starling.conf ]; then
 	esac
 	scopes=$(printf '%s\n' "$scopes" | tr '\n' ' ' | sed 's/   */ /g; s/^ //; s/ $//')
 fi
-if [ -n "$scopes" ]; then
+if [ -n "$scopes" ] && [ "$(git config --file .starling.conf --bool --get commit.requireScope 2>/dev/null)" = true ]; then
+	echo "Scopes: $scopes (every header needs one)"
+elif [ -n "$scopes" ]; then
 	echo "Scopes: $scopes"
 else
 	echo "Scopes: none, so headers take no scope"
