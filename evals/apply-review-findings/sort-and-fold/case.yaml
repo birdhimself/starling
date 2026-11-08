@@ -1,0 +1,67 @@
+schema_version: "1.1"
+name: apply-review-findings-sort-and-fold
+description: >-
+  A real defect is fixed and folded into the pull request's commit, a
+  finding against AGENTS.md is dropped, a rename beyond the change is held
+  or dropped, and the branch is pushed with lease.
+tags: [apply-review-findings]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Apply these review findings to pull request #7, my current branch: 1.
+    cli/main.js passes the count from the command line as a string, so `node
+    cli/main.js Sensors 1` still prints "Sensors: 1 widgets". 2.
+    lib/legacy/label.js still prints the count without a noun; make it say
+    widget or widgets too. 3. Rename formatLabel to formatGroupLabel
+    everywhere, since it formats a group's label.
+  max_turns: 50
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: apply-review-findings
+- name: fixes-the-command-line
+  type: regex
+  target: {source: file, path: cli/main.js}
+  pattern: 'Number\(|parseInt\(|\+count|parseFloat\('
+- name: leaves-legacy-alone
+  type: regex
+  target: {source: file, path: lib/legacy/label.js}
+  pattern: 'widget'
+  match: not_contains
+- name: does-not-rename
+  type: regex
+  target: {source: file, path: lib/label.js}
+  pattern: formatGroupLabel
+  match: not_contains
+- name: folds-into-the-commit
+  type: regex
+  target: {source: file, path: .git/logs/HEAD}
+  pattern: 'rebase|commit \(amend\)'
+- name: validates
+  type: tool_used
+  tool: Bash
+  input_match: 'npm\s+(run\s+)?test'
+- name: pushes-with-lease
+  type: tool_used
+  tool: Bash
+  input_match: 'git push.*--force-with-lease'
+- name: never-marks-ready
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr ready'
+  min: 0
+  max: 0
+- name: reports-each-finding
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it reports finding 1 as
+    applied; finding 2 as dropped or held, not applied, because other
+    dashboards import lib/legacy/ and its output must stay stable; and
+    finding 3 as held or dropped with a reason, not applied. FAIL if it
+    applied 2 or 3, or leaves any finding unaccounted for.
