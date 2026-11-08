@@ -26,7 +26,7 @@ LC_ALL=C
 export LC_ALL
 
 # The verbs of the naming table, with the meaning each has in the rules.
-verbs='implement review apply finish ship refine triage clean generate commit write test'
+verbs='implement review apply finish ship refine resolve triage clean generate commit write test'
 
 usage() {
 	echo "usage: lint [DIR...]" >&2

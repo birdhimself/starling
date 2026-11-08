@@ -57,20 +57,21 @@ steps change, names do not.
 a command: `/implement-issue 456`. The verb comes from this table, and says
 where the skill ends:
 
-| Verb         | Meaning                                 | Ends at                           |
-| ------------ | --------------------------------------- | --------------------------------- |
-| `implement-` | writes code and commits                 | draft pull request                |
-| `review-`    | produces findings, changes nothing      | findings                          |
-| `apply-`     | acts on given findings                  | folded commits                    |
-| `finish-`    | brings an existing pull request to done | CI green, ready                   |
-| `ship-`      | meta: the whole pipeline                | ready pull requests, never merged |
-| `refine-`    | improves an issue's specification       | updated issue                     |
-| `triage-`    | sets classification and links           | metadata set                      |
-| `clean-`     | deletes things, after confirmation      | removed items                     |
-| `generate-`  | creates assets                          | files                             |
-| `commit-`    | creates commits                         | local commits, never pushed       |
-| `write-`     | creates or updates files of its kind    | files                             |
-| `test-`      | runs a suite, changes nothing           | report                            |
+| Verb         | Meaning                                                    | Ends at                           |
+| ------------ | ---------------------------------------------------------- | --------------------------------- |
+| `implement-` | writes code and commits                                    | draft pull request                |
+| `review-`    | produces findings, changes nothing                         | findings                          |
+| `apply-`     | acts on given findings                                     | folded commits                    |
+| `finish-`    | brings an existing pull request to done                    | CI green, ready                   |
+| `ship-`      | meta: the whole pipeline                                   | ready pull requests, never merged |
+| `refine-`    | improves an issue's specification                          | updated issue                     |
+| `resolve-`   | answers review threads, changing code where a remark holds | threads replied to and resolved   |
+| `triage-`    | sets classification and links                              | metadata set                      |
+| `clean-`     | deletes things, after confirmation                         | removed items                     |
+| `generate-`  | creates assets                                             | files                             |
+| `commit-`    | creates commits                                            | local commits, never pushed       |
+| `write-`     | creates or updates files of its kind                       | files                             |
+| `test-`      | runs a suite, changes nothing                              | report                            |
 
 - A skill whose job fits no verb is a sign that it has two purposes. A new
   verb is added to this table in Starling, with its meaning and end point,
