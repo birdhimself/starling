@@ -1,0 +1,49 @@
+#!/bin/sh
+# Starling: install Starling into the git repository around the current
+# directory.
+#
+#   curl -fsSL https://raw.githubusercontent.com/birdhimself/starling/main/install | sh
+#   curl -fsSL https://raw.githubusercontent.com/birdhimself/starling/main/install | sh -s -- v0.1.0
+#   sh path/to/starling/install --from path/to/starling
+#
+# Fetches Starling's main branch for its newest update script and runs it,
+# which installs the newest release or the VERSION given. --from DIR
+# installs from a local Starling checkout instead. Needs only sh and git.
+# Nothing is committed: the summary names the commit header to use after
+# reviewing the changes. Later updates run .starling/bin/update.
+#
+# STARLING_REPO overrides where Starling comes from (default:
+# https://github.com/birdhimself/starling.git).
+#
+# Exit status: 0 done, 1 failed, 2 usage.
+
+set -u
+repo=${STARLING_REPO:-https://github.com/birdhimself/starling.git}
+
+fail() {
+	echo "install: $*" >&2
+	exit 1
+}
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) ||
+	fail "not inside a git work tree: run it in the repository Starling goes into"
+[ ! -e "$top/.starling" ] || fail "Starling is already installed here; update it with .starling/bin/update"
+
+case ${1:-} in
+--from | --from=*)
+	if [ "$1" = --from ]; then from=${2:-}; else from=${1#--from=}; fi
+	[ -n "$from" ] && [ -f "$from/.starling/bin/update" ] || fail "--from needs a Starling checkout"
+	exec sh "$from/.starling/bin/update" "$@"
+	;;
+esac
+
+tmp=$(git rev-parse --absolute-git-dir)/starling-install
+rm -rf "$tmp"
+git clone -q --depth 1 "$repo" "$tmp" || {
+	rm -rf "$tmp"
+	fail "cannot fetch Starling from $repo"
+}
+sh "$tmp/.starling/bin/update" "$@"
+status=$?
+rm -rf "$tmp"
+exit $status

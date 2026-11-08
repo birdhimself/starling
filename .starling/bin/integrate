@@ -1,0 +1,166 @@
+#!/bin/sh
+# Starling: put a Starling source into this repository.
+#
+#   integrate SOURCE VERSION
+#
+# Internal: install and update run it from the version being installed, so
+# every update uses the new version's integration. SOURCE is a Starling
+# checkout. In the repository around the current directory, it:
+#   - replaces .starling/ with SOURCE/.starling and writes .starling/VERSION
+#   - adds the import line to AGENTS.md once, renaming a lone CLAUDE.md to
+#     AGENTS.md and creating AGENTS.md if there is none
+#   - links Starling's skills into .claude/skills/ and .agents/skills/ and
+#     removes links to skills Starling no longer has
+#   - copies .starling/workflows/*.yml into .github/workflows/, with the
+#     default branch in place of main, and removes Starling workflows that
+#     are gone
+#   - creates .claude/settings.json from .starling/claude-settings.json, or
+#     merges Starling's entries into it with jq
+#   - activates Starling's git hooks
+# and prints a summary with the commit header to use. It commits nothing.
+#
+# STARLING_JQ names the jq to use (tests set it to a missing command).
+#
+# Exit status: 0 done, 1 failed, 2 usage.
+
+set -u
+[ $# -eq 2 ] || {
+	echo "usage: integrate SOURCE VERSION" >&2
+	exit 2
+}
+src=$(CDPATH='' cd -- "$1" && pwd -P) && [ -d "$src/.starling" ] || {
+	echo "integrate: $1 is not a Starling checkout" >&2
+	exit 1
+}
+version=$2
+top=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$top" || {
+	echo "integrate: not inside a git work tree" >&2
+	exit 1
+}
+
+notes=
+note() {
+	notes="$notes- $*
+"
+}
+
+old=$(cat .starling/VERSION 2>/dev/null) || old=
+
+# .starling/: remove, then copy, so that a script still running from the old
+# copy keeps reading its old file.
+rm -rf .starling && cp -R "$src/.starling" .starling || {
+	echo "integrate: cannot copy $src/.starling" >&2
+	exit 1
+}
+printf '%s\n' "$version" >.starling/VERSION
+
+# AGENTS.md and the import line. The path must end the line: Claude Code
+# does not import "@.starling/AGENTS.md." with a period after it.
+import='This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md'
+if [ ! -e AGENTS.md ] && [ -f CLAUDE.md ] && [ ! -L CLAUDE.md ]; then
+	if git ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
+		git mv CLAUDE.md AGENTS.md
+	else
+		mv CLAUDE.md AGENTS.md
+	fi
+	note "Renamed CLAUDE.md to AGENTS.md: Claude Code and Codex both read AGENTS.md."
+elif [ -f CLAUDE.md ] && [ ! -L CLAUDE.md ]; then
+	note "CLAUDE.md exists next to AGENTS.md; the shared rules keep agent instructions in AGENTS.md."
+fi
+[ -e AGENTS.md ] || printf '# %s\n' "$(basename "$top")" >AGENTS.md
+if ! grep -q '@\.starling/AGENTS\.md$' AGENTS.md; then
+	if grep -q '^# ' AGENTS.md; then
+		awk -v line="$import" '
+			state == 1 { if ($0 !~ /^[ \t]*$/) print ""; state = 2 }
+			state == 0 && /^# / { print; print ""; print line; state = 1; next }
+			{ print }
+		' AGENTS.md >AGENTS.md.starling
+	else
+		{ printf '%s\n\n' "$import"; cat AGENTS.md; } >AGENTS.md.starling
+	fi
+	mv AGENTS.md.starling AGENTS.md
+fi
+
+# Skill links. A link Starling made points into ../../.starling/skills/.
+for dir in .claude/skills .agents/skills; do
+	mkdir -p "$dir"
+	for link in "$dir"/*; do
+		[ -L "$link" ] || continue
+		case $(readlink "$link") in
+		../../.starling/skills/*) [ -e "$link" ] || rm "$link" ;;
+		esac
+	done
+	for skill in .starling/skills/*/; do
+		[ -d "$skill" ] || continue
+		name=$(basename "$skill")
+		link="$dir/$name"
+		if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+			ln -s "../../.starling/skills/$name" "$link"
+		elif [ ! -L "$link" ] || [ "$(readlink "$link")" != "../../.starling/skills/$name" ]; then
+			note "$link belongs to the project, so Starling's $name skill is not linked there. Rename the project's skill: Starling's names are reserved."
+		fi
+	done
+done
+
+# Workflows, with the repository's default branch in place of main.
+branch=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) && branch=${branch#origin/} || branch=main
+mkdir -p .github/workflows
+for wf in .github/workflows/starling-*.yml; do
+	[ -e "$wf" ] || continue
+	[ -e ".starling/workflows/$(basename "$wf")" ] || rm "$wf"
+done
+for wf in .starling/workflows/*.yml; do
+	[ -e "$wf" ] || continue
+	awk -v branch="$branch" '$0 == "      - main" { print "      - " branch; next } { print }' "$wf" \
+		>".github/workflows/$(basename "$wf")"
+done
+[ "$branch" = main ] || note "The workflows run on pushes to $branch, this repository's default branch."
+
+# Claude Code settings. Starling owns its attribution keys and every hook
+# command under .starling/bin/; the project's other settings stay.
+jq=${STARLING_JQ:-jq}
+filter='
+def starling: (.command? // "") | test("\\.starling/bin/");
+.attribution = ((.attribution // {}) + $s[0].attribution)
+| .hooks = (
+	((.hooks // {}) | with_entries(.value |= [.[] | .hooks |= map(select(starling | not)) | select((.hooks | length) > 0)]))
+	| reduce ($s[0].hooks | to_entries[]) as $e (.; .[$e.key] = ((.[$e.key] // []) + $e.value))
+	| with_entries(select((.value | length) > 0))
+)'
+mkdir -p .claude
+if [ ! -e .claude/settings.json ]; then
+	cp .starling/claude-settings.json .claude/settings.json
+elif command -v "$jq" >/dev/null 2>&1 &&
+	merged=$("$jq" --slurpfile s .starling/claude-settings.json "$filter" .claude/settings.json); then
+	printf '%s\n' "$merged" >.claude/settings.json
+else
+	note "Merge .starling/claude-settings.json into .claude/settings.json by hand (jq is missing or could not read the file): Starling's attribution keys, and its hooks in place of any hook commands under .starling/bin/."
+fi
+
+# Git hooks.
+activation=$(.starling/bin/activate-hooks 2>&1)
+case $? in
+0) ;;
+1) note "$(printf '%s\n' "$activation" | sed '2,$s/^/  /')" ;;
+*) note "Could not activate Starling's git hooks: $activation" ;;
+esac
+
+# Summary.
+if [ -z "$old" ]; then
+	echo "Installed Starling $version."
+	header="build: install Starling $version"
+elif [ "$old" = "$version" ]; then
+	echo "Reinstalled Starling $version."
+	header="build: update Starling to $version"
+else
+	echo "Updated Starling from $old to $version."
+	header="build: update Starling to $version"
+fi
+changes=$(git status --short -- .starling AGENTS.md CLAUDE.md .claude .agents .github/workflows)
+if [ -z "$changes" ]; then
+	echo "Nothing changed."
+else
+	printf '\nChanged:\n%s\n' "$changes"
+fi
+[ -z "$notes" ] || printf '\nNotes:\n%s' "$notes"
+[ -z "$changes" ] || printf '\nReview the changes, then commit them, e.g. with the commit-changes skill:\n  %s\n' "$header"

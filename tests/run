@@ -247,6 +247,122 @@ printf '#!/bin/sh\nexit 0\n' >"$fwd/.githooks/post-commit"
 expect "$fwd" "hooks: a project hook that is not executable" 0 ".githooks/post-commit is not executable" \
 	git commit -q --allow-empty -F "$msgs/valid-full.msg"
 
+# Install and update, offline: a scratch Starling with two releases, v0.1.0
+# as this checkout is, and v0.2.0 without the commit-changes skill and with
+# a second workflow.
+commit_all() { # DIR HEADER
+	git -C "$1" add -A &&
+		git -C "$1" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test \
+			-c user.email=test@example.com commit -q -m "$2" -m "Body."
+}
+star=$tmp/star
+{
+	mkdir "$star" && cp -R "$root/.starling" "$root/install" "$star"/ &&
+		git init -q -b main "$star" && commit_all "$star" "feat: one" && git -C "$star" tag v0.1.0 &&
+		rm -r "$star/.starling/skills/commit-changes" &&
+		cp "$star/.starling/workflows/starling-commits.yml" "$star/.starling/workflows/starling-extra.yml" &&
+		commit_all "$star" "feat: two" && git -C "$star" tag v0.2.0
+} || exit 2
+STARLING_REPO=file://$star
+export STARLING_REPO
+import='This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md'
+has_jq=0
+command -v jq >/dev/null 2>&1 && has_jq=1
+
+# A target with a lone CLAUDE.md, its own Claude Code hook and master as its
+# default branch.
+tgt=$tmp/target
+{
+	git init -q -b master "$tgt" && printf '# Widgets\n\nProject rules.\n' >"$tgt/CLAUDE.md" &&
+		mkdir "$tgt/.claude" &&
+		printf '{"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "./lint.sh"}]}]}}\n' \
+			>"$tgt/.claude/settings.json" &&
+		commit_all "$tgt" "docs: start" &&
+		git -C "$tgt" update-ref refs/remotes/origin/master HEAD &&
+		git -C "$tgt" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
+} || exit 2
+linked() { [ "$(cd "$tgt/$1" 2>/dev/null && pwd -P)" = "$(cd "$tgt/.starling/skills/commit-changes" 2>/dev/null && pwd -P)" ]; }
+gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
+real_dir() { [ -d "$1" ] && [ ! -L "$1" ]; }
+assert() { # NAME CONDITION...
+	name=$1
+	shift
+	if "$@"; then ok; else bad "$name" "failed: $*"; fi
+}
+
+expect "$tgt" "install: a release" 0 "build: install Starling v0.1.0" "$root/install" v0.1.0
+assert "install: version" [ "$(cat "$tgt/.starling/VERSION")" = v0.1.0 ]
+assert "install: CLAUDE.md renamed" [ ! -e "$tgt/CLAUDE.md" ]
+assert "install: import line after the heading" [ "$(sed -n 3p "$tgt/AGENTS.md")" = "$import" ]
+assert "install: skill linked for Claude Code" linked .claude/skills/commit-changes
+assert "install: skill linked for Codex" linked .agents/skills/commit-changes
+assert "install: workflow on the default branch" grep -qx '      - master' "$tgt/.github/workflows/starling-commits.yml"
+assert "install: hooks active" [ "$(git -C "$tgt" config core.hooksPath)" = .starling/hooks ]
+if [ "$has_jq" = 1 ]; then
+	assert "install: project hook kept" grep -q 'lint.sh' "$tgt/.claude/settings.json"
+	assert "install: Starling's hooks merged" grep -q 'deny-hook-bypass' "$tgt/.claude/settings.json"
+fi
+expect "$tgt" "install: refuses a second install" 1 "already installed" "$root/install"
+commit_all "$tgt" "build: install Starling v0.1.0"
+
+expect "$tgt" "update: to the newest release" 0 "Updated Starling from v0.1.0 to v0.2.0" .starling/bin/update
+assert "update: version" [ "$(cat "$tgt/.starling/VERSION")" = v0.2.0 ]
+assert "update: link to a removed skill removed" gone "$tgt/.claude/skills/commit-changes"
+assert "update: new workflow" [ -f "$tgt/.github/workflows/starling-extra.yml" ]
+assert "update: one import line" [ "$(grep -c '@\.starling/AGENTS\.md$' "$tgt/AGENTS.md")" = 1 ]
+if [ "$has_jq" = 1 ]; then
+	assert "update: Starling's hooks not doubled" [ "$(grep -c 'deny-hook-bypass' "$tgt/.claude/settings.json")" = 1 ]
+fi
+commit_all "$tgt" "build: update Starling to v0.2.0"
+echo change >>"$tgt/AGENTS.md"
+expect "$tgt" "update: refuses uncommitted changes" 1 "commit or stash your changes first" .starling/bin/update
+git -C "$tgt" checkout -q -- AGENTS.md
+expect "$tgt" "update: to an older release" 0 "from v0.2.0 to v0.1.0" .starling/bin/update v0.1.0
+assert "update: skill linked again" linked .claude/skills/commit-changes
+assert "update: removed workflow removed" [ ! -e "$tgt/.github/workflows/starling-extra.yml" ]
+commit_all "$tgt" "build: update Starling to v0.1.0"
+expect "$tgt" "update: from a checkout" 0 "from v0.1.0 to v0.2.0" .starling/bin/update --from "$star"
+git -C "$tgt" reset -q --hard && git -C "$tgt" clean -qfd
+expect "$tgt" "update: unknown release" 1 "cannot fetch Starling v9.9.9" .starling/bin/update v9.9.9
+expect "$star" "update: refuses Starling's own repository" 1 "Starling's own repository" .starling/bin/update
+expect "$tmp" "update: outside a repository" 1 "not inside a git work tree" "$star/.starling/bin/update"
+
+# A target without instructions or settings.
+plain=$tmp/plain
+{ git init -q "$plain" && echo "readme" >"$plain/README" && commit_all "$plain" "docs: start"; } || exit 2
+expect "$plain" "install: into a bare project" 0 "Installed Starling v0.2.0" "$root/install"
+assert "install: AGENTS.md created" [ "$(cat "$plain/AGENTS.md")" = "# plain
+
+$import" ]
+assert "install: settings created" cmp -s "$plain/.claude/settings.json" "$plain/.starling/claude-settings.json"
+
+# A target where husky owns the hooks, AGENTS.md has no heading, a project
+# skill has Starling's skill name and jq is missing.
+husky=$tmp/husky
+{
+	git init -q "$husky" && printf 'Project rules.\n' >"$husky/AGENTS.md" &&
+		mkdir -p "$husky/.claude/skills/commit-changes" &&
+		echo '{"model": "opus"}' >"$husky/.claude/settings.json" &&
+		echo "# Own skill" >"$husky/.claude/skills/commit-changes/SKILL.md" &&
+		commit_all "$husky" "docs: start" && git -C "$husky" config core.hooksPath .husky/_
+} || exit 2
+STARLING_JQ=$tmp/no-jq
+export STARLING_JQ
+out=$(cd "$husky" && run "$root/install" v0.1.0 2>&1)
+status=$?
+unset STARLING_JQ
+assert "install: despite husky" [ "$status" -eq 0 ]
+for want in "core.hooksPath is" "belongs to the project" "by hand"; do
+	if printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+		bad "install: note \"$want\"" "$out"
+	fi
+done
+assert "install: import line first without a heading" [ "$(sed -n 1p "$husky/AGENTS.md")" = "$import" ]
+assert "install: project skill untouched" real_dir "$husky/.claude/skills/commit-changes"
+assert "install: hooks path left to husky" [ "$(git -C "$husky" config core.hooksPath)" = .husky/_ ]
+assert "install: settings untouched without jq" [ "$(cat "$husky/.claude/settings.json")" = '{"model": "opus"}' ]
+unset STARLING_REPO
+
 # Ranges, checked as CI checks them.
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-full.msg" || exit 2
 git -C "$repo" commit -q --allow-empty -F "$msgs/valid-breaking.msg" || exit 2
