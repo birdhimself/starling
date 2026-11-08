@@ -69,3 +69,10 @@ Starling repository.
 - Update `AGENTS.md` only when a change introduces or invalidates durable
   instructions. Leave out feature summaries, temporary notes and what the
   code already makes clear. Keep commands and paths accurate.
+
+## Skills
+
+- Create, change, rename or split a skill with the `write-skill` skill,
+  and check one with the `test-skill` skill. A repository's own skills
+  live in `.agents/skills/<name>/`, where Codex finds them, linked from
+  `.claude/skills/<name>` for Claude Code.
