@@ -114,8 +114,9 @@ breaks and what users must do. There is no `BREAKING CHANGE:` trailer.
 
 **Scope.** Only one listed under `Scopes:`. When scopes are listed, use the
 one that names the part of the project the commit changes, and leave it out
-only when the commit spans several parts. With no scopes listed, there is
-none. Never add a scope to `.starling.conf`.
+only when the commit spans several parts; when `Scopes:` says every header
+needs one, use the one the commit mainly changes, or split the commit. With
+no scopes listed, there is none. Never add a scope to `.starling.conf`.
 
 **Description.** Imperative, starting lowercase, no period at the end:
 `fix: keep the cursor when the list reloads`. Say what changes for users or
