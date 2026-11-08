@@ -103,6 +103,62 @@ for skill in "$root"/.starling/skills/*/; do
 	done
 done
 
+# test-skill's lint. tests/skills/NAME is a skill: without NAME.expect the
+# lint must pass it silently; with NAME.expect it must fail and print every
+# line of that file. Starling's own skills must pass.
+lint="$root/.starling/skills/test-skill/scripts/lint"
+for skill in "$root"/tests/skills/*/; do
+	name=$(basename "$skill")
+	out=$(cd "$root" && run "$lint" "$skill" 2>&1)
+	status=$?
+	if [ -f "$root/tests/skills/$name.expect" ]; then
+		missing=
+		while IFS= read -r want; do
+			printf '%s\n' "$out" | grep -qF -- "$want" || missing="$missing  $want
+"
+		done <"$root/tests/skills/$name.expect"
+		if [ "$status" -eq 1 ] && [ -z "$missing" ]; then ok; else
+			bad "lint: $name" "exit $status; missing:
+$missing
+got:
+$out"
+		fi
+	elif [ "$status" -eq 0 ] && [ -z "$out" ]; then ok; else
+		bad "lint: $name" "expected no findings, got exit $status:
+$out"
+	fi
+done
+expect "$root" "lint: Starling's own skills" 0 "" "$lint"
+if [ -z "$out" ]; then ok; else bad "lint: Starling's own skills are silent" "$out"; fi
+long=$tmp/skills/review-long
+{
+	mkdir -p "$long" "$tmp/skills/notes" && cp "$root/tests/skills/review-widgets/SKILL.md" "$long/SKILL.md" &&
+		awk 'BEGIN { for (i = 0; i < 500; i++) print "Line." }' >>"$long/SKILL.md" &&
+		sed 's/review-widgets/review-long/' "$long/SKILL.md" >"$long/SKILL.md.new" && mv "$long/SKILL.md.new" "$long/SKILL.md" &&
+		mkdir -p "$long/scripts" "$long/references" && cp -p "$root/tests/skills/review-widgets/scripts/"* "$long/scripts/" &&
+		cp "$root/tests/skills/review-widgets/references/"* "$long/references/"
+} || exit 2
+expect "$root" "lint: a long SKILL.md" 1 "keep it under 500" "$lint" "$long"
+expect "$root" "lint: a directory of skills" 1 "notes: has no SKILL.md" "$lint" "$tmp/skills"
+expect "$root" "lint: neither skill nor directory" 2 "neither a skill nor a directory of skills" "$lint" "$tmp/none"
+expect "$tmp" "lint: outside a repository" 2 "not inside a git work tree" "$lint"
+expect "$root" "lint: options" 2 "usage: lint" "$lint" --help
+
+# In a project, the lint checks the project's own skills: real directories in
+# .agents/skills and .claude/skills, not Starling's or links.
+proj=$tmp/proj
+{
+	git init -q "$proj" && mkdir -p "$proj/.agents/skills" "$proj/.claude/skills" "$proj/.starling/skills" &&
+		cp -R "$root/tests/skills/fetch-widgets" "$proj/.agents/skills/" &&
+		ln -s ../../.agents/skills/fetch-widgets "$proj/.claude/skills/fetch-widgets" &&
+		cp -R "$root/tests/skills/review-mismatch" "$proj/.starling/skills/" &&
+		echo v0.0.0 >"$proj/.starling/VERSION"
+} || exit 2
+expect "$proj" "lint: a project's own skills" 1 ".agents/skills/fetch-widgets/SKILL.md:2:" "$lint"
+if printf '%s\n' "$out" | grep -q 'review-mismatch\|\.claude/skills'; then
+	bad "lint: not Starling's skills or links in a project" "$out"
+else ok; fi
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then

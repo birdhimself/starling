@@ -1,0 +1,5 @@
+scripts/run.sh:1: starts with #! but ends in .sh
+scripts/collect:1: starts with #! but is not executable
+scripts/data.sh:1: ends in .sh, which marks a file that is sourced
+scripts/plain:1: is executable but has no #! line
+scripts/scratch:2: creates a temporary file

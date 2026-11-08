@@ -1,0 +1,327 @@
+#!/bin/sh
+# Starling: check skills against Starling's rules for skills.
+#
+#   lint [DIR...]
+#
+# DIR is a skill directory, one with a SKILL.md, or a directory of skills.
+# Without DIR, it checks this repository's own skills: the real directories
+# in .agents/skills/ and .claude/skills/, and .starling/skills/ in Starling's
+# own repository, which has no .starling/VERSION. Links to skills are
+# skipped; they are checked where they point.
+#
+# It checks what a script can decide: the frontmatter, the name and its
+# verb, the description, the length of SKILL.md, the paths and skills the
+# skill refers to, step numbers of other skills, hard-coded repositories,
+# how scripts are named, temporary files in scripts, and that reference
+# files do not link further. Judgment, such as whether a skill has one
+# purpose, is left to the reader. The rules are in the write-skill skill.
+#
+# Prints nothing when every skill passes. Otherwise prints one line per
+# problem, "path:line: problem; fix".
+#
+# Exit status: 0 all pass, 1 a rule is broken, 2 usage or nothing to check.
+
+set -u
+LC_ALL=C
+export LC_ALL
+
+# The verbs of the naming table, with the meaning each has in the rules.
+verbs='implement review apply finish ship refine triage clean generate commit write test'
+
+usage() {
+	echo "usage: lint [DIR...]" >&2
+	exit 2
+}
+case ${1:-} in
+-h | --help) usage ;;
+-*) usage ;;
+esac
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || top=
+
+# Skill names that references may use: every entry, link or not, in the
+# repository's skill directories and next to each checked skill.
+known=' '
+add_known() {
+	for entry in "$1"/*; do
+		[ -d "$entry" ] && known="$known$(basename "$entry") "
+	done
+}
+if [ -n "$top" ]; then
+	for base in .starling/skills .claude/skills .agents/skills; do
+		add_known "$top/$base"
+	done
+fi
+
+# The skill directories to check, one per line.
+skills=
+add_skill() { skills="$skills$1
+"; }
+problems=
+problem() { # PATH LINE TEXT; LINE may be empty
+	problems="$problems$1:${2:+$2:} $3
+"
+}
+add_dir() { # DIR: a skill, or a directory of skills
+	if [ -f "$1/SKILL.md" ]; then
+		add_skill "$1"
+		return 0
+	fi
+	[ -d "$1" ] || return 1
+	for entry in "$1"/*; do
+		[ -e "$entry" ] || continue
+		[ -L "$entry" ] && continue
+		if [ -f "$entry/SKILL.md" ]; then
+			add_skill "$entry"
+		elif [ -d "$entry" ]; then
+			problem "$entry" "" "has no SKILL.md; every directory here must be a skill, so move it or add one"
+		fi
+	done
+}
+
+if [ $# -gt 0 ]; then
+	for dir in "$@"; do
+		add_dir "${dir%/}" || {
+			echo "lint: $dir is neither a skill nor a directory of skills" >&2
+			exit 2
+		}
+	done
+else
+	[ -n "$top" ] || {
+		echo "lint: not inside a git work tree; name the skills to check" >&2
+		exit 2
+	}
+	for base in .agents/skills .claude/skills; do
+		[ -d "$top/$base" ] && add_dir "$top/$base"
+	done
+	[ -f "$top/.starling/VERSION" ] || [ ! -d "$top/.starling/skills" ] || add_dir "$top/.starling/skills"
+fi
+[ -n "$skills" ] || [ -n "$problems" ] || {
+	echo "lint: no skills found" >&2
+	exit 2
+}
+
+# scan MODE NAME FILE: check one Markdown file of a skill. MODE is skill for
+# SKILL.md, reference for files in references/. Prints records for the
+# caller: "P<TAB>line<TAB>text" for a problem, "R<TAB>line<TAB>path" for a
+# path the skill refers to, relative to the skill, and "S<TAB>line<TAB>name"
+# for a skill it names.
+scan() {
+	awk -v mode="$1" -v name="$2" -v verbs="$verbs" '
+	function chars(s, copy) {
+		copy = s
+		return length(s) - gsub(/[\200-\277]/, "", copy)
+	}
+	function report(line, text) { printf "P\t%d\t%s\n", line, text }
+	function refs(line, s, p, owner, skill, rest) {
+		t = s
+		while (match(t, /(^|[^A-Za-z0-9._\/-])(scripts|references|assets)\/[A-Za-z0-9._\/-]*[A-Za-z0-9_]/)) {
+			p = substr(t, RSTART, RLENGTH)
+			if (p !~ /^(scripts|references|assets)\//) p = substr(p, 2)
+			if (mode == "reference" && p ~ /^references\//)
+				report(line, "links to " p "; link every reference file from SKILL.md, one level deep")
+			else
+				printf "R\t%d\t%s\n", line, p
+			t = substr(t, RSTART + RLENGTH)
+		}
+		t = s
+		while (match(t, /\.(starling|claude|agents)\/skills\/[a-z0-9-]+[A-Za-z0-9._\/-]*/)) {
+			p = substr(t, RSTART, RLENGTH)
+			sub(/[.\/]+$/, "", p)
+			rest = p
+			sub(/^\.[a-z]+\/skills\//, "", rest)
+			skill = rest
+			sub(/\/.*/, "", skill)
+			rest = substr(rest, length(skill) + 2)
+			if (skill != name)
+				report(line, "refers to the " skill " skill by its path " p "; name the skill instead, as in \"the `" skill "` skill\"")
+			else if (rest != "")
+				printf "R\t%d\t%s\n", line, rest
+			t = substr(t, RSTART + RLENGTH)
+		}
+		t = s
+		while (match(t, /`[a-z0-9]+(-[a-z0-9]+)+` skill/)) {
+			p = substr(t, RSTART + 1, RLENGTH - 8)
+			printf "S\t%d\t%s\n", line, p
+			t = substr(t, RSTART + RLENGTH)
+		}
+		t = s
+		while (match(t, /[Uu]se `[a-z0-9]+(-[a-z0-9]+)+`/)) {
+			p = substr(t, RSTART + 5, RLENGTH - 6)
+			printf "S\t%d\t%s\n", line, p
+			t = substr(t, RSTART + RLENGTH)
+		}
+		if (s ~ /[Ss]tep [0-9]+ of (the )?`/ || s ~ /`[a-z0-9-]+`\047s step [0-9]/)
+			report(line, "refers to a step of another skill by its number; say what that skill does instead, since its steps may change")
+		t = s
+		while (match(t, /repos\/[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+/)) {
+			p = substr(t, RSTART, RLENGTH)
+			owner = p
+			sub(/^repos\//, "", owner)
+			sub(/\/.*/, "", owner)
+			if (owner != "owner" && owner != "OWNER")
+				report(line, "hard-codes the repository in " p "; write repos/{owner}/{repo}, which gh api fills in from the current repository")
+			t = substr(t, RSTART + RLENGTH)
+		}
+		if (match(s, /(^|[ \t])(-R|--repo)[ =]+[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+/)) {
+			p = substr(s, RSTART, RLENGTH)
+			sub(/^[ \t]/, "", p)
+			report(line, "hard-codes the repository in " p "; drop it, gh uses the current repository")
+		}
+		if (mode == "reference" && match(s, /\]\((\.\/)?[A-Za-z0-9._-]+\.md\)/))
+			report(line, "links to another file next to it; link every reference file from SKILL.md, one level deep")
+	}
+	BEGIN { state = (mode == "skill") ? 0 : 2 }
+	state == 0 {
+		if ($0 == "---") { state = 1; next }
+		report(1, "no YAML frontmatter; start the file with a --- line, then name: and description:, then ---")
+		state = 2
+		nofront = 1
+	}
+	state == 1 {
+		if ($0 == "---") { state = 2; next }
+		if ($0 ~ /^[A-Za-z0-9_-]+:/) {
+			key = $0
+			sub(/:.*/, "", key)
+			val = $0
+			sub(/^[^:]*:[ \t]*/, "", val)
+			at[key] = NR
+			if (val ~ /^[>|][-+]?[ \t]*$/)
+				val = ""
+			else if (val ~ /^".*"[ \t]*$/ || val ~ /^\047.*\047[ \t]*$/) {
+				sub(/[ \t]*$/, "", val)
+				val = substr(val, 2, length(val) - 2)
+			}
+			value[key] = val
+			next
+		}
+		if ($0 ~ /^[ \t]/ && key != "") {
+			v = $0
+			sub(/^[ \t]+/, "", v)
+			value[key] = (value[key] == "") ? v : value[key] " " v
+		}
+		next
+	}
+	{ refs(NR, $0) }
+	END {
+		if (mode != "skill") exit
+		if (state == 1) {
+			report(1, "the frontmatter has no closing --- line; add one after the description")
+			exit
+		}
+		if (nofront) exit
+		if (!("name" in value) || value["name"] == "")
+			report(1, "no name in the frontmatter; add name: " name)
+		else {
+			n = value["name"]
+			if (n !~ /^[a-z0-9]+(-[a-z0-9]+)*$/)
+				report(at["name"], "the name " n " is not kebab-case; use lowercase letters, digits and single hyphens")
+			else {
+				if (n != name)
+					report(at["name"], "the name is " n " but the directory is " name "; make them the same")
+				if (chars(n) > 64)
+					report(at["name"], "the name has " chars(n) " characters; keep it at most 64")
+				if (n ~ /(^|-)(anthropic|claude)(-|$)/)
+					report(at["name"], "the name " n " uses a word reserved by Anthropic; choose another")
+				verb = n
+				sub(/-.*/, "", verb)
+				if (n !~ /-/ || index(" " verbs " ", " " verb " ") == 0)
+					report(at["name"], "the name " n " does not start with a verb of the naming table followed by an object (" verbs "); pick the verb whose meaning and end point fit, as the write-skill skill describes")
+			}
+		}
+		if (!("description" in value) || value["description"] == "")
+			report(1, "no description in the frontmatter; say what the skill does, \"Use when ...\" and \"Do not use for ...\"")
+		else {
+			d = value["description"]
+			l = at["description"]
+			if (chars(d) > 1024)
+				report(l, "the description has " chars(d) " characters; keep it at most 1024")
+			if (match(d, /<[A-Za-z\/!?]/))
+				report(l, "the description contains an XML tag at \"" substr(d, RSTART, 12) "\"; say it in words, tags are not allowed there")
+			if (index(d, "Use when") == 0)
+				report(l, "the description has no \"Use when\"; add the requests that should load the skill, as in \"Use when asked to ...\"")
+			if (index(d, "Do not use for") == 0)
+				report(l, "the description has no \"Do not use for\"; add the requests it must not take, naming the skill to use instead")
+			refs(l, d)
+		}
+		if (NR >= 500)
+			report(NR, "SKILL.md has " NR " lines; keep it under 500 by moving details into references/")
+	}' "$3"
+}
+
+# check FILE MODE SKILLDIR: scan a file and turn the records into problems.
+check() {
+	c_file=$1 c_dir=$3
+	records=$(scan "$2" "$(basename "$3")" "$1")
+	[ -n "$records" ] || return 0
+	while IFS='	' read -r kind line text; do
+		case $kind in
+		P) problem "$c_file" "$line" "$text" ;;
+		R)
+			[ -e "$c_dir/$text" ] ||
+				problem "$c_file" "$line" "refers to $text, which does not exist in this skill; create it or fix the path"
+			;;
+		S)
+			case $known in
+			*" $text "*) ;;
+			*) problem "$c_file" "$line" "names the skill $text, which does not exist here; fix the name, write a command built into the agent as /$text, or drop the reference" ;;
+			esac
+			;;
+		esac
+	done <<EOF
+$records
+EOF
+}
+
+# check_script FILE: the naming rule for commands and sourced files, and no
+# temporary files. The mode comes from ls, not test -x, which is true for
+# root whenever the file system lets root execute it.
+check_script() {
+	first=
+	IFS= read -r first <"$1"
+	case $(ls -ld -- "$1") in
+	???x* | ??????x* | ?????????x*) executable=1 ;;
+	*) executable= ;;
+	esac
+	case $first in
+	'#!'*)
+		[ -n "$executable" ] || problem "$1" 1 "starts with #! but is not executable; make it executable with chmod +x"
+		case $1 in
+		*.sh) problem "$1" 1 "starts with #! but ends in .sh; drop the extension, since commands have none" ;;
+		esac
+		;;
+	*)
+		if [ -n "$executable" ]; then
+			case $1 in
+			*.sh) problem "$1" 1 "ends in .sh, which marks a file that is sourced or run by an interpreter, but is executable; remove the executable bit" ;;
+			*) problem "$1" 1 "is executable but has no #! line; start it with #!/bin/sh, or remove the executable bit" ;;
+			esac
+		fi
+		;;
+	esac
+	found=$(grep -n "mk[t]emp" "$1") || return 0
+	while IFS=: read -r line rest; do
+		problem "$1" "$line" "creates a temporary file; keep data in variables and pipes, since sandboxes refuse temporary files"
+	done <<EOF
+$found
+EOF
+}
+
+while IFS= read -r dir; do
+	[ -n "$dir" ] || continue
+	add_known "$(dirname "$dir")"
+	known="$known$(basename "$dir") "
+	check "$dir/SKILL.md" skill "$dir"
+	for file in "$dir"/references/*.md; do
+		[ -f "$file" ] && check "$file" reference "$dir"
+	done
+	for file in "$dir"/scripts/*; do
+		[ -f "$file" ] && check_script "$file"
+	done
+done <<EOF
+$skills
+EOF
+
+[ -n "$problems" ] || exit 0
+printf '%s' "$problems" | sort -t: -k1,1 -k2,2n -k3 | uniq
+exit 1
