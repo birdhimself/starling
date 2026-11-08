@@ -62,7 +62,9 @@ expect "$repo" "hook: invalid message" 1 'type `chore` is not allowed' "$hook" "
 # Usage errors.
 expect "$repo" "usage: no arguments" 2 "usage:" "$check"
 
-# Every .starling/ path that Starling's instructions name exists.
+# Every .starling/ path that Starling's instructions name exists, except
+# placeholders such as .starling/skills/<name>/ and .starling/VERSION, which
+# the installer writes.
 missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
 	awk '{
 		s = $0
@@ -71,6 +73,7 @@ missing=$(find "$root/.starling" -name '*.md' | while read -r md; do
 			s = substr(s, RSTART + RLENGTH)
 		}
 	}' "$md" | while read -r path; do
+		case $path in (*'<'* | .starling/VERSION) continue ;; esac
 		[ -e "$root/$path" ] || echo "${md#"$root"/} names $path"
 	done
 done)
@@ -158,6 +161,41 @@ expect "$proj" "lint: a project's own skills" 1 ".agents/skills/fetch-widgets/SK
 if printf '%s\n' "$out" | grep -q 'review-mismatch\|\.claude/skills'; then
 	bad "lint: not Starling's skills or links in a project" "$out"
 else ok; fi
+
+# The lint's verbs are the naming table's in write-skill's rules.
+rules="$root/.starling/skills/write-skill/references/rules.md"
+table=$(sed -n 's/^| `\([a-z]*\)-` .*/\1/p' "$rules" | sort | tr '\n' ' ')
+script=$(sed -n "s/^verbs='\(.*\)'$/\1/p" "$lint" | tr ' ' '\n' | sort | tr '\n' ' ')
+if [ -n "$table" ] && [ "$table" = "$script" ]; then ok; else
+	bad "lint: the verbs of the naming table" "rules: $table
+lint: $script"
+fi
+
+# The write-skill context script, in Starling and in the project above.
+wcontext="$root/.starling/skills/write-skill/scripts/context"
+expect "$root" "write-skill context: Starling" 0 "Repository: Starling itself" "$wcontext"
+expect "$root" "write-skill context: Starling's eval setup" 0 \
+	"Eval setup: .claude-plugin/plugin.json loads ./.starling/skills" "$wcontext"
+expect "$root" "write-skill context: Starling's skills" 0 "  commit-changes (Starling's own): Commits the changes" "$wcontext"
+{
+	mkdir -p "$proj/.claude/skills/review-old" "$proj/.agents/skills/review-unlinked" &&
+		cp "$root/tests/skills/review-widgets/SKILL.md" "$proj/.claude/skills/review-old/SKILL.md" &&
+		cp "$root/tests/skills/review-widgets/SKILL.md" "$proj/.agents/skills/review-unlinked/SKILL.md" &&
+		ln -s ../../.agents/skills/review-gone "$proj/.claude/skills/review-gone"
+} || exit 2
+expect "$proj" "write-skill context: a project" 0 "Repository: a project with Starling v0.0.0" "$wcontext"
+expect "$proj" "write-skill context: where a project's skills go" 0 \
+	"New skills go in: .agents/skills/<name>/, linked from .claude/skills/<name>" "$wcontext"
+expect "$proj" "write-skill context: no eval setup" 0 "Eval setup: none" "$wcontext"
+expect "$proj" "write-skill context: a project skill" 0 "  fetch-widgets (.agents/skills): Reviews widgets" "$wcontext"
+expect "$proj" "write-skill context: Starling's skill" 0 "  review-mismatch (Starling): Reviews widgets" "$wcontext"
+expect "$proj" "write-skill context: a skill to move" 0 "move it to .agents/skills" "$wcontext"
+expect "$proj" "write-skill context: a skill not linked" 0 \
+	"not linked from .claude/skills/review-unlinked" "$wcontext"
+expect "$proj" "write-skill context: a broken link" 0 "the link .claude/skills/review-gone is broken" "$wcontext"
+mkdir -p "$proj/.claude-plugin" && printf '{"name": "proj", "skills": "./skills"}\n' >"$proj/.claude-plugin/plugin.json"
+expect "$proj" "write-skill context: a manifest elsewhere" 0 "does not load .agents/skills" "$wcontext"
+expect "$tmp" "write-skill context: outside a repository" 2 "not inside a git work tree" "$wcontext"
 
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.

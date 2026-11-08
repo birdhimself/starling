@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: write-skill-move-old-skill
+description: >-
+  Changing a project skill that is still a real directory in .claude/skills
+  moves it to .agents/skills with a link back, and its description gains
+  the requests it must not take.
+tags: [write-skill]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    The review-labels skill keeps getting used when people ask to fix a
+    label. Make it clear that it only reviews labels.
+  max_turns: 60
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: write-skill
+  - name: moves-it-to-agents-skills
+    type: regex
+    target: trace
+    pattern: '\b(mv|cp|rm)\b[^"\n;&|]*\.claude/skills/review-labels'
+  - name: links-it-for-claude-code
+    type: regex
+    target: trace
+    pattern: 'ln -s\S* \.\./\.\./\.agents/skills/review-labels'
+  - name: says-when-not-to
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: Do not use for
+  - name: runs-the-lint
+    type: tool_used
+    tool: Bash
+    input_match: test-skill/scripts/lint
+  - name: never-commits
+    type: tool_used
+    tool: Bash
+    input_match: git\s+commit
+    min: 0
+    max: 0
