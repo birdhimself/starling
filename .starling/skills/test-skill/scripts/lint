@@ -113,6 +113,12 @@ scan() {
 		return length(s) - gsub(/[\200-\277]/, "", copy)
 	}
 	function report(line, text) { printf "P\t%d\t%s\n", line, text }
+	# In an unquoted YAML value, a "#" after a space starts a comment, which
+	# silently cuts the value off there.
+	function comment(line, v) {
+		if (plain && match(v, /(^|[ \t])#/))
+			report(line, "the " key " is cut off at \"" substr(v, RSTART, 8) "\", since YAML reads a # after a space as a comment; write `#` in backticks, or quote the value")
+	}
 	function refs(line, s, p, owner, skill, rest) {
 		t = s
 		while (match(t, /(^|[^A-Za-z0-9._\/-])(scripts|references|assets)\/[A-Za-z0-9._\/-]*[A-Za-z0-9_]/)) {
@@ -186,18 +192,22 @@ scan() {
 			val = $0
 			sub(/^[^:]*:[ \t]*/, "", val)
 			at[key] = NR
+			plain = 0
 			if (val ~ /^[>|][-+]?[ \t]*$/)
 				val = ""
 			else if (val ~ /^".*"[ \t]*$/ || val ~ /^\047.*\047[ \t]*$/) {
 				sub(/[ \t]*$/, "", val)
 				val = substr(val, 2, length(val) - 2)
-			}
+			} else
+				plain = 1
+			comment(NR, val)
 			value[key] = val
 			next
 		}
 		if ($0 ~ /^[ \t]/ && key != "") {
 			v = $0
 			sub(/^[ \t]+/, "", v)
+			comment(NR, v)
 			value[key] = (value[key] == "") ? v : value[key] " " v
 		}
 		next
