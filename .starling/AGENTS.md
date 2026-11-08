@@ -4,8 +4,9 @@ These rules come from [Starling](https://github.com/birdhimself/starling)
 and apply to every repository that imports this file. A repository's own
 `AGENTS.md` may refine them for its project; its checks apply either way.
 
-`.starling/` is managed by Starling and replaced on every update. Never edit
-files in it: changes belong in the Starling repository.
+`.starling/` is managed by Starling and replaced on every update
+(`.starling/bin/update`). Never edit files in it: changes belong in the
+Starling repository.
 
 ## Working with the maintainer
 

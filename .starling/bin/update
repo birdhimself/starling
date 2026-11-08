@@ -1,0 +1,97 @@
+#!/bin/sh
+# Starling: update Starling in this repository, or install it.
+#
+#   .starling/bin/update [VERSION]
+#   .starling/bin/update --from DIR
+#
+# Fetches Starling VERSION (a release tag such as v0.2.0; the newest by
+# default) with git and runs that version's integrate script, which
+# replaces .starling/ and sets up the files Starling owns outside it.
+# --from DIR uses a local Starling checkout instead. Nothing is committed:
+# the summary names the commit header to use after reviewing the changes.
+#
+# Refuses to run with uncommitted changes to tracked files, so that
+# Starling's changes can be reviewed on their own.
+#
+# STARLING_REPO overrides where Starling comes from (default:
+# https://github.com/birdhimself/starling.git).
+#
+# Exit status: 0 done, 1 failed, 2 usage.
+
+set -u
+repo=${STARLING_REPO:-https://github.com/birdhimself/starling.git}
+
+usage() {
+	echo "usage: update [VERSION]" >&2
+	echo "       update --from DIR" >&2
+	exit 2
+}
+fail() {
+	echo "update: $*" >&2
+	exit 1
+}
+
+# newest: print the highest vX.Y.Z tag of the tags on standard input.
+newest() {
+	awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ {
+		split(substr($0, 2), p, ".")
+		key = sprintf("%09d%09d%09d", p[1], p[2], p[3])
+		if (key > best) { best = key; tag = $0 }
+	} END { if (tag != "") print tag }'
+}
+
+# The whole script runs from a function, so the shell has read all of it
+# before integrate replaces .starling/, this file included.
+main() {
+	from= version=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--from) [ $# -ge 2 ] || usage; from=$2; shift 2 ;;
+		--from=*) from=${1#--from=}; shift ;;
+		-*) usage ;;
+		*) [ -z "$version" ] || usage; version=$1; shift ;;
+		esac
+	done
+	[ -z "$from" ] || [ -z "$version" ] || usage
+	if [ -n "$from" ]; then
+		from=$(CDPATH='' cd -- "$from" 2>/dev/null && pwd -P) || fail "cannot read the directory given with --from"
+	fi
+
+	top=$(git rev-parse --show-toplevel 2>/dev/null) || fail "not inside a git work tree: run it in the repository Starling goes into"
+	cd "$top" || exit 1
+	top=$(pwd -P)
+	if [ -e install ] && [ -e .starling/bin/integrate ] && [ ! -e .starling/VERSION ]; then
+		fail "this is Starling's own repository, where .starling/ is the source"
+	fi
+	[ -z "$(git status --porcelain --untracked-files=no)" ] ||
+		fail "commit or stash your changes first, so that Starling's changes can be reviewed on their own"
+
+	if [ -n "$from" ]; then
+		[ -f "$from/.starling/bin/integrate" ] || fail "$from is not a Starling checkout"
+		[ "$from" != "$top" ] || fail "this is the checkout given with --from"
+		version=$(git -C "$from" describe --tags --always --dirty 2>/dev/null) || version=unknown
+		sh "$from/.starling/bin/integrate" "$from" "$version"
+		return
+	fi
+
+	if [ -z "$version" ]; then
+		tags=$(git ls-remote --tags --refs "$repo" 'v*') || fail "cannot reach $repo"
+		version=$(printf '%s\n' "$tags" | sed 's|.*refs/tags/||' | newest)
+		[ -n "$version" ] || fail "found no release of Starling at $repo"
+	fi
+	# A clone in the git directory needs no temporary directory, which
+	# sandboxes may refuse.
+	tmp=$(git rev-parse --absolute-git-dir)/starling-update
+	rm -rf "$tmp"
+	if ! git -c advice.detachedHead=false clone -q --depth 1 --branch "$version" "$repo" "$tmp"; then
+		rm -rf "$tmp"
+		fail "cannot fetch Starling $version from $repo"
+	fi
+	sh "$tmp/.starling/bin/integrate" "$tmp" "$version"
+	status=$?
+	rm -rf "$tmp"
+	return $status
+}
+
+main "$@"
+exit
