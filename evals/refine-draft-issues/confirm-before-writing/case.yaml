@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: refine-draft-issues-confirm-before-writing
+description: >-
+  A refined body follows the structure and the policy's extra section,
+  keeps the undecided parts as open questions, and nothing is written
+  before the user confirms.
+tags: [refine-draft-issues]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Refine draft issue #12. GitHub is not reachable from here; its body
+    says: "The lobby crashes sometimes when the host leaves. We should fix
+    it." There are no comments.
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: refine-draft-issues
+- name: reads-the-policy
+  type: regex
+  target: trace
+  pattern: 'policy/refine-draft-issues\.md'
+- name: writes-nothing-unconfirmed
+  type: tool_used
+  tool: Bash
+  input_match: 'gh issue (edit|close)|gh api -X (POST|PATCH|DELETE)'
+  min: 0
+  max: 0
+- name: restates-and-waits
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it proposes a body for issue
+    #12 with a goal, a scope, acceptance criteria, validation, and a
+    Rollout section, lists what is still undecided (such as when exactly
+    the crash happens) as open questions or keeps the issue a draft for
+    that reason, and asks the user to confirm before anything is written.
+    FAIL if it says it updated the issue, has no Rollout section, or
+    invents an answer to the open question.

@@ -1,0 +1,52 @@
+#!/bin/sh
+# Starling: print a GitHub issue's relationships.
+#
+#   relations ISSUE
+#
+# Prints, for ISSUE in the current repository, the issues that block it, the
+# issues it blocks, its parent and its sub-issues, one per line as
+# "#number state title", or "none". Needs gh, logged in.
+#
+# Exit status: 0, 1 when GitHub cannot be read, 2 usage.
+
+set -u
+case ${1:-} in
+'' | *[!0-9]*)
+	echo "usage: relations ISSUE" >&2
+	exit 2
+	;;
+esac
+issue=$1
+fields='"#\(.number) \(.state) \(.title)"'
+
+# list LABEL PATH: one list of related issues, under its label.
+list() {
+	related=$(gh api "repos/{owner}/{repo}/issues/$issue/$2?per_page=100" --jq ".[] | $fields") || {
+		echo "relations: cannot read \"$1\" for #$issue from GitHub" >&2
+		exit 1
+	}
+	echo "$1:"
+	if [ -n "$related" ]; then
+		printf '%s\n' "$related" | sed 's/^/  /'
+	else
+		echo "  none"
+	fi
+}
+
+list "Blocked by" dependencies/blocked_by
+list "Blocking" dependencies/blocking
+
+# GitHub answers 404 for an issue without a parent.
+if parent=$(gh api "repos/{owner}/{repo}/issues/$issue/parent" --jq "$fields" 2>&1); then
+	printf 'Parent:\n  %s\n' "$parent"
+else
+	case $parent in
+	*404* | *"Not Found"*) printf 'Parent:\n  none\n' ;;
+	*)
+		echo "relations: cannot read the parent of #$issue from GitHub: $parent" >&2
+		exit 1
+		;;
+	esac
+fi
+
+list "Sub-issues" sub_issues
