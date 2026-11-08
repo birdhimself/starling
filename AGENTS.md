@@ -7,11 +7,14 @@ folder.
 This repository also follows the shared rules in Starling; read them
 before starting any task: @.starling/AGENTS.md
 
-If a `.notes/` folder exists, read `.notes/design.md` (what was decided and
-why) and `.notes/roadmap.md` (the steps, their status and the open questions)
-before starting any task. When a step is finished, a decision changes or a
-question is answered, update those files in the same change. They are private
-and must never be copied into this repository.
+`README.md` explains how to use Starling, and `docs/design.md` what was
+decided and why. Read `docs/design.md` before changing how Starling works.
+When a decision changes, update it in the same change. Planned work and open
+questions are GitHub issues.
+
+This repository is public, and most repositories that use it are private.
+Never name, quote or describe a private repository here: not in files,
+tests, commit messages, pull requests or issues. Use neutral examples.
 
 - `.starling/` is the payload: exactly what a repository receives on install.
   Here it is the source, so the shared rule against editing it does not
