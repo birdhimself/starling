@@ -158,6 +158,13 @@ expect "$work" "context: pushed commit" 0 " pushed feat(api)!: drop the v1 widge
 expect "$work" "context: local commit" 0 " local  docs: link the upstream issue" "$context"
 expect "$work" "context: changes" 0 "?? new-file" "$context"
 expect "$work/sub" "context: from a subdirectory" 0 "Branch: topic" "$context"
+git -C "$work" checkout -q -b from-base --track origin/main &&
+	git -C "$work" commit -q --allow-empty -F "$msgs/valid-url-line.msg" || exit 2
+expect "$work" "context: tracking the base is not pushed" 0 "Branch: from-base, never pushed" "$context"
+expect "$work" "context: tracking the base, local commit" 0 " local  docs: link the upstream issue" "$context"
+git -C "$work" checkout -q main || exit 2
+expect "$work" "context: the base branch itself" 0 "Branch: main, pushed to origin/main" "$context"
+git -C "$work" checkout -q topic || exit 2
 printf '[commit]\n\tscopes = api\n\tscopes = ui\n' >"$work/.starling.conf"
 expect "$work" "context: scopes" 0 "Scopes: api ui" "$context"
 printf '[commit]\n\tscopes = api ui\n\trequireScope = yes\n' >"$work/.starling.conf"

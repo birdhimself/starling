@@ -40,9 +40,27 @@ else
 	echo "Scopes: none, so headers take no scope"
 fi
 
-# Branch and upstream.
+# Base: the remote's default branch, else main or master.
+base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || base=
+if [ -z "$base" ]; then
+	for candidate in origin/main origin/master main master; do
+		if git rev-parse -q --verify "$candidate^{commit}" >/dev/null; then
+			base=$candidate
+			break
+		fi
+	done
+fi
+
+# Branch and upstream. A branch made from the base, as
+# `git switch -c topic origin/main` makes one, tracks the base without
+# having been pushed, so that upstream does not count unless the branch is
+# the base branch itself.
 branch=$(git symbolic-ref -q --short HEAD) || branch=
 upstream=$(git rev-parse -q --verify --symbolic-full-name '@{upstream}' 2>/dev/null) || upstream=
+if [ -n "$upstream" ] && [ -n "$base" ] && [ "${upstream#refs/remotes/*/}" != "$branch" ] &&
+	[ "$upstream" = "$(git rev-parse -q --verify --symbolic-full-name "$base" 2>/dev/null)" ]; then
+	upstream=
+fi
 if [ -z "$upstream" ] && [ -n "$branch" ] &&
 	git rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
 	upstream=refs/remotes/origin/$branch
@@ -62,17 +80,6 @@ for op in rebase-merge:rebase rebase-apply:rebase MERGE_HEAD:merge CHERRY_PICK_H
 		break
 	fi
 done
-
-# Base: the remote's default branch, else main or master.
-base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || base=
-if [ -z "$base" ]; then
-	for candidate in origin/main origin/master main master; do
-		if git rev-parse -q --verify "$candidate^{commit}" >/dev/null; then
-			base=$candidate
-			break
-		fi
-	done
-fi
 
 if ! git rev-parse -q --verify HEAD >/dev/null; then
 	echo "Commits: none yet"
