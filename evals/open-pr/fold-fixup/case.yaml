@@ -1,0 +1,39 @@
+schema_version: "1.1"
+name: open-pr-fold-fixup
+description: >-
+  A leftover fixup commit is folded before the pull request is opened.
+tags: [open-pr]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Open a pull request for this branch.
+  max_turns: 40
+  timeout_seconds: 900
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: open-pr
+- name: folds-the-fixup
+  type: regex
+  target: {source: file, path: .git/logs/HEAD}
+  pattern: 'rebase.*\(fixup\)|rebase \(finish\)'
+- name: creates-a-draft
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr create[^|;&]*--draft'
+- name: never-marks-ready
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr ready'
+  min: 0
+  max: 0
+- name: never-merges
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr merge|git merge(?!-)'
+  min: 0
+  max: 0

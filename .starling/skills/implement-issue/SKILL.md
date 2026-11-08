@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implements a GitHub issue given by number, such as `#456`, end to end. It reads the whole thread, settles open questions with the user before writing code, implements with tests, commits, and opens draft pull requests that close the issue on merge, splitting larger work into a stack of reviewable pull requests. Ends at the draft pull requests. Use when asked to implement, build, fix or work on an issue, or to turn an issue into a pull request. Do not use for refining an issue that is not ready (use `refine-draft-issues`), for classifying or linking issues (use `triage-issue`), for reviewing or merging pull requests, or for a change that has no issue.
+description: Implements a GitHub issue given by number, such as `#456`, end to end. It reads the whole thread, settles open questions with the user before writing code, implements with tests, commits, and opens draft pull requests that close the issue on merge, splitting larger work into a stack of reviewable pull requests. Ends at the draft pull requests. Use when asked to implement, build, fix or work on an issue, or to turn an issue into a pull request. Do not use for refining an issue that is not ready (use `refine-draft-issues`), for classifying or linking issues (use `triage-issue`), for reviewing or merging pull requests, for a change that has no issue, or for opening a pull request for work that is already done (use `open-pr`).
 argument-hint: "<issue>"
 ---
 

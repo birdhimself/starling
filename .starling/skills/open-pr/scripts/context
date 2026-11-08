@@ -1,0 +1,120 @@
+#!/bin/sh
+# Starling: print the facts the open-pr skill works from.
+#
+#   context [BASE]
+#
+# Prints the branch, the base it is compared with (BASE, or else the remote's
+# default branch), how far the branch is ahead of and behind that base, any
+# rebase or merge in progress, the branch's commits and the issues they name,
+# uncommitted changes, the repository's pull request template and the open
+# pull request for the branch. It only reads. Run git fetch first for an
+# up-to-date comparison.
+#
+# Exit status: 0, or 2 outside a work tree, without a base, or for a usage
+# error.
+
+set -u
+
+[ $# -le 1 ] || {
+	echo "usage: context [BASE]" >&2
+	exit 2
+}
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "context: not inside a git work tree" >&2
+	exit 2
+}
+cd "$top" || exit 2
+
+# The remote's default branch, else main or master.
+default=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || default=
+if [ -z "$default" ]; then
+	for candidate in origin/main origin/master; do
+		if git rev-parse -q --verify "$candidate^{commit}" >/dev/null; then
+			default=$candidate
+			break
+		fi
+	done
+fi
+
+# A base given as "develop" means the remote's branch of that name.
+base=${1:-$default}
+if [ -n "${1:-}" ] && git rev-parse -q --verify "refs/remotes/origin/$1^{commit}" >/dev/null; then
+	base=origin/$1
+fi
+if [ -z "$base" ]; then
+	echo "context: no base branch found; name it: context BASE" >&2
+	exit 2
+fi
+git rev-parse -q --verify "$base^{commit}" >/dev/null || {
+	echo "context: base not found: $base" >&2
+	exit 2
+}
+
+branch=$(git symbolic-ref -q --short HEAD) || branch=
+if [ -z "$branch" ]; then
+	echo "Branch: none (detached HEAD)"
+elif [ "$branch" = "${default#origin/}" ]; then
+	echo "Branch: $branch, the default branch"
+elif git rev-parse -q --verify "refs/remotes/origin/$branch^{commit}" >/dev/null; then
+	echo "Branch: $branch, pushed to origin/$branch"
+else
+	echo "Branch: $branch, never pushed"
+fi
+
+if git rev-parse -q --verify HEAD >/dev/null; then
+	echo "Base: $base, $(git rev-list --count "$base..HEAD") commit(s) ahead, $(git rev-list --count "HEAD..$base") behind"
+else
+	echo "Base: $base, no commits on this branch yet"
+fi
+
+for op in rebase-merge:rebase rebase-apply:rebase MERGE_HEAD:merge CHERRY_PICK_HEAD:cherry-pick REVERT_HEAD:revert; do
+	if [ -e "$(git rev-parse --git-path "${op%%:*}")" ]; then
+		echo "In progress: a ${op#*:}"
+		break
+	fi
+done
+
+echo "Commits:"
+commits=$(git log --reverse --format='  %h %s' "$base..HEAD" 2>/dev/null)
+if [ -n "$commits" ]; then
+	printf '%s\n' "$commits"
+	refs=$(git log --reverse --format='%(trailers:key=Refs,valueonly)' "$base..HEAD" |
+		awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep = ", " }')
+	echo "Refs: ${refs:-none}"
+else
+	echo "  none"
+	echo "Refs: none"
+fi
+
+echo "Changes:"
+changes=$(git status --short --untracked-files=all)
+if [ -n "$changes" ]; then
+	printf '%s\n' "$changes" | sed 's/^/  /'
+else
+	echo "  none"
+fi
+
+# GitHub's template locations: the root, docs/ and .github/, as one file or
+# as a folder of them, with the name in any case.
+templates=$(git ls-files | awk '{ p = tolower($0) }
+	p ~ /^(\.github\/|docs\/)?pull_request_template(\.md|\.txt)?$/ { print }
+	p ~ /^(\.github\/|docs\/)?pull_request_template\/[^\/]+\.(md|txt)$/ { print }')
+case $templates in
+'') echo "Template: none" ;;
+*'
+'*)
+	echo "Template: several"
+	printf '%s\n' "$templates" | sed 's/^/  /'
+	;;
+*) echo "Template: $templates" ;;
+esac
+
+# gh fails when it is missing, signed out or cannot reach GitHub.
+if [ -z "$branch" ]; then
+	echo "Pull request: none"
+elif found=$(gh pr list --head "$branch" --state open --limit 1 --json number,isDraft,url \
+	--jq '.[0] | select(. != null) | "#\(.number) \(if .isDraft then "draft" else "ready" end) \(.url)"' 2>/dev/null); then
+	echo "Pull request: ${found:-none}"
+else
+	echo "Pull request: unknown, gh could not say"
+fi

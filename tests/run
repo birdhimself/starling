@@ -435,6 +435,84 @@ expect "$br" "report: an unknown base" 2 "base ref not found: nope" "$report" --
 expect "$br" "report: an unknown option" 2 "usage: report" "$report" --force
 expect "$tmp" "report: outside a repository" 2 "not inside a git repository" "$report"
 
+# open-pr's context script, on a real repository. A fake gh prints the open
+# pull request from a file, and fails without that file.
+context="$root/.starling/skills/open-pr/scripts/context"
+op=$tmp/open-pr
+op_commit() { # FILE MESSAGE: commit a change to FILE on the current branch
+	mkdir -p "$(dirname "$op/$1")" && echo "$1" >>"$op/$1" && git -C "$op" add -A &&
+		git -C "$op" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -q -m "$2" || exit 2
+}
+op_has() { # NAME WANT [BASE]: context exits 0 and prints WANT
+	name=$1 want=$2
+	shift 2
+	out=$(cd "$op" && PATH="$tmp/opbin:$PATH" FAKE_OPEN_PR="$tmp/op-answer" && export PATH FAKE_OPEN_PR && run "$context" "$@" 2>&1)
+	status=$?
+	if [ "$status" -eq 0 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+		bad "open-pr context: $name" "expected exit 0 and \"$want\", got exit $status:
+$out"
+	fi
+}
+mkdir -p "$tmp/opbin" && cat >"$tmp/opbin/gh" <<'EOF'
+#!/bin/sh
+[ -f "$FAKE_OPEN_PR" ] || exit 1
+cat "$FAKE_OPEN_PR"
+EOF
+chmod +x "$tmp/opbin/gh"
+: >"$tmp/op-answer"
+{
+	git init -q -b main "$op" && git -C "$op" config user.name Test && git -C "$op" config user.email test@example.com &&
+		git init -q --bare "$tmp/op-origin.git" && git -C "$op" remote add origin "$tmp/op-origin.git"
+} || exit 2
+op_commit base "feat: start"
+{ git -C "$op" push -q -u origin main && git -C "$op" remote set-head origin main; } || exit 2
+
+op_has "the default branch" "Branch: main, the default branch"
+git -C "$op" checkout -q -b topic || exit 2
+op_commit topic-file "feat: add a topic
+
+Refs: #12"
+op_has "a branch never pushed" "Branch: topic, never pushed"
+op_has "commits ahead" "Base: origin/main, 1 commit(s) ahead, 0 behind"
+op_has "the commits" "feat: add a topic"
+op_has "the issues they name" "Refs: #12"
+op_has "no template" "Template: none"
+op_has "no open pull request" "Pull request: none"
+echo '#7 draft https://github.example/7' >"$tmp/op-answer"
+op_has "an open pull request" "Pull request: #7 draft https://github.example/7"
+rm "$tmp/op-answer"
+op_has "gh fails" "Pull request: unknown"
+: >"$tmp/op-answer"
+echo change >"$op/loose"
+op_has "uncommitted changes" "?? loose"
+rm "$op/loose"
+
+git -C "$op" checkout -q main || exit 2
+op_commit main-file "feat: move on"
+{ git -C "$op" push -q origin main && git -C "$op" checkout -q topic; } || exit 2
+op_has "commits behind" "Base: origin/main, 1 commit(s) ahead, 1 behind"
+git -C "$op" push -q origin topic || exit 2
+op_has "a pushed branch" "Branch: topic, pushed to origin/topic"
+{ git -C "$op" branch --no-track develop origin/main && git -C "$op" push -q origin develop; } || exit 2
+op_has "a named base" "Base: origin/develop, " develop
+
+op_commit .github/PULL_REQUEST_TEMPLATE.md "docs: add a template"
+op_has "a template in any case" "Template: .github/PULL_REQUEST_TEMPLATE.md"
+op_commit docs/pull_request_template.md "docs: add another template"
+op_has "several templates" "Template: several"
+
+: >"$op/.git/MERGE_HEAD"
+op_has "a merge in progress" "In progress: a merge"
+rm "$op/.git/MERGE_HEAD"
+git -C "$op" checkout -q --detach || exit 2
+op_has "a detached HEAD" "Branch: none (detached HEAD)"
+git -C "$op" checkout -q topic || exit 2
+
+expect "$op" "open-pr context: an unknown base" 2 "base not found: nope" "$context" nope
+expect "$op" "open-pr context: usage" 2 "usage: context" "$context" one two
+expect "$repo" "open-pr context: no remote" 2 "no base branch found" "$context"
+expect "$tmp" "open-pr context: outside a repository" 2 "not inside a git work tree" "$context"
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then

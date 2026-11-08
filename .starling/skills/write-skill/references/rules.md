@@ -62,6 +62,7 @@ where the skill ends:
 | `implement-` | writes code and commits                                    | draft pull request                |
 | `review-`    | produces findings, changes nothing                         | findings                          |
 | `apply-`     | acts on given findings                                     | folded commits                    |
+| `open-`      | opens a pull request for finished work                     | open pull request                 |
 | `finish-`    | brings an existing pull request to done                    | CI green, ready                   |
 | `ship-`      | meta: the whole pipeline                                   | ready pull requests, never merged |
 | `refine-`    | improves an issue's specification                          | updated issue                     |

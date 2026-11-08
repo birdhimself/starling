@@ -1,6 +1,6 @@
 ---
 name: finish-pr
-description: Brings an existing pull request to ready for review with green checks. It folds leftover fixup commits, rebases a branch that is behind its base, waits for CI on the head commit, marks a draft ready and waits for the checks that starts, and fixes one CI failure before reporting. Ends at a ready pull request, never merged. Use when asked to finish a pull request, get it green, mark it ready once CI passes, or watch its CI. Do not use for implementing an issue (use `implement-issue`), for acting on review findings (use `apply-review-findings`), for answering review threads (use `resolve-review-threads`), or for merging.
+description: Brings an existing pull request to ready for review with green checks. It folds leftover fixup commits, rebases a branch that is behind its base, waits for CI on the head commit, marks a draft ready and waits for the checks that starts, and fixes one CI failure before reporting. Ends at a ready pull request, never merged. Use when asked to finish a pull request, get it green, mark it ready once CI passes, or watch its CI. Do not use for implementing an issue (use `implement-issue`), for opening a pull request (use `open-pr`), for acting on review findings (use `apply-review-findings`), for answering review threads (use `resolve-review-threads`), or for merging.
 argument-hint: "[pr]"
 ---
 
