@@ -1,0 +1,73 @@
+schema_version: "1.1"
+name: implement-issue-start-at-branch
+description: >-
+  A caller with the scope settled starts at the branch: the fix lands on
+  its own branch with a test, validated as the policy says, committed with
+  the issue's trailer, and opened as a draft.
+tags: [implement-issue]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Implement #12. GitHub is not reachable from here, so this is the settled
+    thread: a group with exactly one widget is labeled "Sensors: 1 widgets";
+    it must read "Sensors: 1 widget". All questions are answered, it is one
+    pull request with a test, and nothing else changes. Start at the branch.
+  max_turns: 60
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: implement-issue
+- name: branches-by-type-and-number
+  type: tool_used
+  tool: Bash
+  input_match: 'git (switch|checkout)\s+(--no-track\s+)?-[cb]\s+fix/12-'
+- name: validates-as-the-policy-says
+  type: tool_used
+  tool: Bash
+  input_match: 'npm\s+(run\s+)?test'
+- name: commits-with-commit-changes
+  type: tool_used
+  tool: Skill
+  input_match: commit-changes
+- name: commit-refs-the-issue
+  type: regex
+  target: {source: file, path: .git/COMMIT_EDITMSG}
+  pattern: '^Refs: #12$'
+  flags: m
+- name: commit-is-a-fix
+  type: regex
+  target: {source: file, path: .git/COMMIT_EDITMSG}
+  pattern: '^fix(\([a-z-]+\))?: '
+- name: closes-in-the-pr-not-the-commit
+  type: regex
+  target: {source: file, path: .git/COMMIT_EDITMSG}
+  pattern: 'closes #12'
+  flags: i
+  match: not_contains
+- name: opens-a-draft-or-says-why-not
+  type: llm
+  focus: trace
+  criteria: >-
+    PASS if the agent either ran gh pr create with --draft, or said in its
+    last message that the draft pull request was not opened and how to open
+    it as a draft; and in either case the pull request body it wrote, in a
+    file or in a message, contains "Closes #12". FAIL if it neither tried
+    nor reported the missing pull request, if the body it wrote lacks
+    "Closes #12", or if it opened a pull request that is not a draft.
+- name: leaves-legacy-alone
+  type: tool_used
+  tool: Edit
+  input_match: 'lib/legacy/'
+  min: 0
+  max: 0
+- name: never-merges
+  type: tool_used
+  tool: Bash
+  input_match: 'gh pr merge|git merge'
+  min: 0
+  max: 0

@@ -206,6 +206,39 @@ if [ "$(printf '%s\n' "$out" | tail -n 1)" = "  none" ]; then ok; else
 fi
 expect "$tmp" "write-skill context: outside a repository" 2 "not inside a git work tree" "$wcontext"
 
+# triage-issue's relations script, against a fake gh that answers by path.
+relations="$root/.starling/skills/triage-issue/scripts/relations"
+mkdir -p "$tmp/fakebin" && cat >"$tmp/fakebin/gh" <<'EOF'
+#!/bin/sh
+case $2 in
+*/12/dependencies/blocked_by*) echo "#3 open Fix the lobby crash" ;;
+*/12/dependencies/blocking*) ;;
+*/12/parent) echo "#1 open Lobbies" ;;
+*/12/sub_issues*) printf '#13 closed Show the host\n#14 open Kick a player\n' ;;
+*/13/parent) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+*/13/*) ;;
+*) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/fakebin/gh"
+out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 12 2>&1)
+want='Blocked by:
+  #3 open Fix the lobby crash
+Blocking:
+  none
+Parent:
+  #1 open Lobbies
+Sub-issues:
+  #13 closed Show the host
+  #14 open Kick a player'
+if [ "$out" = "$want" ]; then ok; else bad "relations: an issue with relationships" "$out"; fi
+out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 13 2>&1)
+if [ "$(printf '%s\n' "$out" | grep -c '^  none$')" = 4 ]; then ok; else
+	bad "relations: an issue without any" "$out"
+fi
+PATH="$tmp/fakebin:$PATH" expect "$repo" "relations: GitHub fails" 1 'cannot read "Blocked by" for #99' "$relations" 99
+expect "$repo" "relations: usage" 2 "usage: relations ISSUE" "$relations" twelve
+
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the
 # system's temporary directory, and a bare mktemp ignores TMPDIR on macOS.
 if found=$(grep -l mktemp "$root"/.starling/bin/* "$root"/.starling/skills/*/scripts/* 2>/dev/null); then

@@ -1,0 +1,21 @@
+schema_version: "1.1"
+name: implement-issue-skip-refine
+description: >-
+  Refining a draft issue is not implementing it.
+tags: [implement-issue]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Refine draft issue #12 so that it is ready to implement.
+  max_turns: 15
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: does-not-use-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: implement-issue
+  min: 0
+  max: 0

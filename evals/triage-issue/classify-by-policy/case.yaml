@@ -1,0 +1,44 @@
+schema_version: "1.1"
+name: triage-issue-classify-by-policy
+description: >-
+  Classifying an issue follows the repository's policy: one type and one
+  area label, and no priority nobody decided.
+tags: [triage-issue]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Issue #12 says the lobby crashes when the host leaves before the game
+    starts. Classify it.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: triage-issue
+- name: reads-the-policy
+  type: regex
+  target: trace
+  pattern: 'policy/triage-issue\.md'
+- name: reads-the-issue
+  type: tool_used
+  tool: Bash
+  input_match: '(issues/12|issue (view|edit) 12|relations 12)'
+- name: sets-no-priority
+  type: tool_used
+  tool: Bash
+  input_match: issue-field-values
+  min: 0
+  max: 0
+- name: classifies-by-the-policy
+  type: llm
+  focus: trace
+  criteria: >-
+    Read the agent's last message. PASS if it gives issue #12 the type Bug
+    and the label area::lobby, as the repository's policy defines them,
+    sets or proposes no priority, and does not claim that a change was made
+    on GitHub when its gh commands failed. FAIL if it picks another type or
+    area, proposes a priority, or reports changes that did not happen.

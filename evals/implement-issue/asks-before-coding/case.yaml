@@ -1,0 +1,51 @@
+schema_version: "1.1"
+name: implement-issue-asks-before-coding
+description: >-
+  Without the issue's thread, the skill reads what it can and stops before
+  writing code or creating a branch.
+tags: [implement-issue]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Implement #12.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+- name: uses-the-skill
+  type: tool_used
+  tool: Skill
+  input_match: implement-issue
+- name: reads-the-policy
+  type: regex
+  target: trace
+  pattern: 'policy/implement-issue\.md'
+- name: reads-the-thread
+  type: tool_used
+  tool: Bash
+  input_match: 'gh issue view 12.*--comments|gh issue view .*--comments.*12'
+- name: never-edits
+  type: tool_used
+  tool: Edit
+  min: 0
+  max: 0
+- name: never-writes-into-the-repository
+  type: tool_used
+  tool: Write
+  input_match: '"file_path":\s*"[^"]*/(lib|test|\.agents)/'
+  min: 0
+  max: 0
+- name: creates-no-branch
+  type: tool_used
+  tool: Bash
+  input_match: 'git (switch|checkout)\s+(--no-track\s+)?-[cb]|git branch\s+[^-]'
+  min: 0
+  max: 0
+- name: never-commits
+  type: tool_used
+  tool: Bash
+  input_match: git\s+commit
+  min: 0
+  max: 0
