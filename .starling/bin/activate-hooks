@@ -10,7 +10,9 @@
 #
 # When something else set core.hooksPath, such as husky, it changes nothing:
 # that tool would set it back. It prints a note instead, on standard output
-# so that Claude Code passes it to the model, and exits 1.
+# so that Claude Code passes it to the model, and exits 1. The note ends with
+# the command that takes over once the tool is gone, since removing a tool
+# leaves its core.hooksPath behind.
 #
 # Exit status: 0 hooks active, 1 another hooks path is set, 2 not in a
 # repository with Starling installed.
@@ -27,8 +29,9 @@ case $current in
 Starling's git hooks are not active in this clone: core.hooksPath is
 $current, set by another tool such as husky. Commit messages are only
 checked in CI until this is fixed. To fix it, move this repository's own
-hooks to .githooks/<name>, which Starling's hooks run, remove the tool that
-set core.hooksPath, and run .starling/bin/activate-hooks again.
+hooks to .githooks/<name>, which Starling's hooks run, and remove the tool
+that set core.hooksPath. Removing it leaves the setting behind, so then run:
+  git config --unset core.hooksPath && .starling/bin/activate-hooks
 EOF
 	exit 1
 	;;
