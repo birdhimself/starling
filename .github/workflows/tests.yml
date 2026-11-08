@@ -60,6 +60,21 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src alpine:3.21
           sh -c 'apk add --no-cache git >/dev/null && sh tests/run'
 
+  # Projects get .starling/ as it is and may run Prettier over their whole
+  # tree, so the payload must be Prettier-clean with its default options.
+  prettier:
+    name: Prettier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the payload's formatting
+        run: npx --yes prettier@3.9.10 --check .starling
+
   # macOS: its sh and the BSD awk.
   macos:
     name: macOS sh with BSD awk
