@@ -195,6 +195,15 @@ expect "$proj" "write-skill context: a skill not linked" 0 \
 expect "$proj" "write-skill context: a broken link" 0 "the link .claude/skills/review-gone is broken" "$wcontext"
 mkdir -p "$proj/.claude-plugin" && printf '{"name": "proj", "skills": "./skills"}\n' >"$proj/.claude-plugin/plugin.json"
 expect "$proj" "write-skill context: a manifest elsewhere" 0 "does not load .agents/skills" "$wcontext"
+mkdir -p "$proj/.agents/policy" && echo "# Labels" >"$proj/.agents/policy/fetch-widgets.md" &&
+	echo "# Old" >"$proj/.agents/policy/review-retired.md" || exit 2
+expect "$proj" "write-skill context: a policy file" 0 "  .agents/policy/fetch-widgets.md" "$wcontext"
+expect "$proj" "write-skill context: a policy file for no skill" 0 \
+	".agents/policy/review-retired.md: no skill is named review-retired" "$wcontext"
+expect "$root" "write-skill context: no policy files" 0 "Policy files:" "$wcontext"
+if [ "$(printf '%s\n' "$out" | tail -n 1)" = "  none" ]; then ok; else
+	bad "write-skill context: no policy files listed" "$out"
+fi
 expect "$tmp" "write-skill context: outside a repository" 2 "not inside a git work tree" "$wcontext"
 
 # Scripts keep data in variables and pipes. Sandboxes refuse writes to the

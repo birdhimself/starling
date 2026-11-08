@@ -14,6 +14,7 @@ Contents:
 - The body of SKILL.md
 - Scripts
 - Where skills live
+- Project policy
 
 ## Purpose and shape
 
@@ -158,3 +159,23 @@ must not run.
   `../../.agents/skills/<name>` for Claude Code. A skill that is still a
   real directory in `.claude/skills/` moves to `.agents/skills/` when it
   is next changed.
+
+## Project policy
+
+Starling's skills are generic: Starling is shared by many repositories and
+must not carry one repository's details. What a repository adds to one of
+them goes into a policy file, never into the skill.
+
+- A Starling skill that depends on such details reads
+  `.agents/policy/<skill>.md` when it exists, before its first step, and
+  says what that file may hold, such as "the issue types and labels this
+  repository uses". The policy refines the skill's defaults; it cannot
+  lift the skill's contract.
+- `AGENTS.md` keeps what applies to every task, such as the validation
+  commands; a policy file holds what matters only while its skill runs,
+  so that it is not loaded into every session.
+- A policy file is plain Markdown named after the skill, with no
+  frontmatter. It states the repository's rules and the commands they
+  need, not the skill's steps.
+- A repository's own skill keeps its details in itself; policy files are
+  for Starling's skills.
