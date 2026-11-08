@@ -358,11 +358,13 @@ $import" ]
 assert "install: settings created" cmp -s "$plain/.claude/settings.json" "$plain/.starling/claude-settings.json"
 assert "install: no .prettierignore without Prettier" gone "$plain/.prettierignore"
 
-# A target that uses Prettier, with an ignore file that does not end in a
-# newline and settings on one line, which jq rewrites.
+# A target that uses Prettier and Renovate, with an ignore file that does not
+# end in a newline and settings on one line, which jq rewrites.
 fmt=$tmp/fmt
+rule='{"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "enabled": false}'
 {
 	git init -q "$fmt" && printf '{"devDependencies": {"prettier": "3.9.10"}}\n' >"$fmt/package.json" &&
+		printf '{\n  extends: ["config:recommended"],\n}\n' >"$fmt/renovate.json5" &&
 		printf 'dist/' >"$fmt/.prettierignore" && mkdir "$fmt/.claude" &&
 		echo '{"model": "opus"}' >"$fmt/.claude/settings.json" && commit_all "$fmt" "docs: start"
 } || exit 2
@@ -382,6 +384,11 @@ assert "update: .starling/ ignored once" [ "$(grep -c '^\.starling/$' "$fmt/.pre
 if printf '%s\n' "$out" | grep -qF "run Prettier on it"; then
 	bad "update: no settings note when jq changes nothing" "$out"
 else ok; fi
+if printf '%s\n' "$out" | grep -qF "  $rule"; then ok; else bad "update: the Renovate rule" "$out"; fi
+printf '{\n  extends: ["config:recommended"],\n  packageRules: [%s],\n}\n' "$rule" >"$fmt/renovate.json5"
+commit_all "$fmt" "build: keep Renovate off Starling's files"
+expect "$fmt" "update: with the Renovate rule" 0 "Reinstalled Starling v0.2.0" .starling/bin/update
+if printf '%s\n' "$out" | grep -qF "Renovate"; then bad "update: no Renovate note once the rule exists" "$out"; else ok; fi
 
 # A target where husky owns the hooks, AGENTS.md has no heading, a project
 # skill has Starling's skill name and jq is missing.
