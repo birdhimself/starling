@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="Starling logo" width="200">
+</p>
+
 # Starling
 
 My shared instructions, skills, scripts and checks for coding agents. Each
