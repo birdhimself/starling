@@ -347,6 +347,11 @@ them:
   asks before running eval cases, because they take minutes and the runner
   reports a cost. `write-skill` writes cases where an eval setup exists and
   asks whether to set one up otherwise.
+- **Evals run on a smaller model.** The eval command passes
+  `--model sonnet`, so cases do not run on the session's model. A skill that
+  only the strongest model follows fails in the sessions that use a smaller
+  one, and the smaller model makes a suite cheaper to run. The judge stays
+  on Sonnet as well: Haiku's verdicts were less reliable.
 - **Sources.** Anthropic's best practices for skills are the spec, together
   with these rules. Anthropic's `skill-creator` is a source of testing
   ideas, not a style model.
