@@ -89,6 +89,10 @@ including its own skills and `.starling.conf`.
   `.github/workflows/starling-*.yml`, `enabled: false`) until the config
   mentions `.github/workflows/starling-`; `sh` and `awk` cannot edit JSON5
   safely, so it does not add the entry itself.
+- The summary ends with a hint at the `adopt-starling` skill, by the path
+  of its file, when a first install finds agent instructions or skills of
+  the project's own, and when an update brought skills, which it names.
+  The installer cannot judge what they replace; see Skills.
 - Nothing is committed: the summary lists the changes and the header to use
   (`build: install Starling vX.Y.Z`, `build: update Starling to vX.Y.Z`).
   Both refuse uncommitted changes to tracked files, so the diff stands

@@ -729,6 +729,9 @@ assert() { # NAME CONDITION...
 }
 
 expect "$tgt" "install: a release" 0 "build: install Starling v0.1.0" "$root/install" v0.1.0
+if printf '%s\n' "$out" | grep -qF "The adopt-starling skill compares them"; then ok; else
+	bad "install: hint at adopt-starling for a project with instructions" "$out"
+fi
 assert "install: version" [ "$(cat "$tgt/.starling/VERSION")" = v0.1.0 ]
 assert "install: CLAUDE.md renamed" [ ! -e "$tgt/CLAUDE.md" ]
 assert "install: import line after the heading" [ "$(sed -n 3p "$tgt/AGENTS.md")" = "$import" ]
@@ -744,6 +747,9 @@ expect "$tgt" "install: refuses a second install" 1 "already installed" "$root/i
 commit_all "$tgt" "build: install Starling v0.1.0"
 
 expect "$tgt" "update: to the newest release" 0 "Updated Starling from v0.1.0 to v0.2.0" .starling/bin/update
+if printf '%s\n' "$out" | grep -qF "adopt-starling"; then
+	bad "update: no hint at adopt-starling without new skills" "$out"
+else ok; fi
 assert "update: version" [ "$(cat "$tgt/.starling/VERSION")" = v0.2.0 ]
 assert "update: link to a removed skill removed" gone "$tgt/.claude/skills/commit-changes"
 assert "update: new workflow" [ -f "$tgt/.github/workflows/starling-extra.yml" ]
@@ -756,6 +762,9 @@ echo change >>"$tgt/AGENTS.md"
 expect "$tgt" "update: refuses uncommitted changes" 1 "commit or stash your changes first" .starling/bin/update
 git -C "$tgt" checkout -q -- AGENTS.md
 expect "$tgt" "update: to an older release" 0 "from v0.2.0 to v0.1.0" .starling/bin/update v0.1.0
+if printf '%s\n' "$out" | grep -qF "New skills: commit-changes. The adopt-starling skill checks"; then ok; else
+	bad "update: hint at adopt-starling with the new skills" "$out"
+fi
 assert "update: skill linked again" linked .claude/skills/commit-changes
 assert "update: removed workflow removed" [ ! -e "$tgt/.github/workflows/starling-extra.yml" ]
 commit_all "$tgt" "build: update Starling to v0.1.0"
@@ -769,6 +778,9 @@ expect "$tmp" "update: outside a repository" 1 "not inside a git work tree" "$st
 plain=$tmp/plain
 { git init -q "$plain" && echo "readme" >"$plain/README" && commit_all "$plain" "docs: start"; } || exit 2
 expect "$plain" "install: into a bare project" 0 "Installed Starling v0.2.0" "$root/install"
+if printf '%s\n' "$out" | grep -qF "adopt-starling"; then
+	bad "install: no hint at adopt-starling in a bare project" "$out"
+else ok; fi
 assert "install: AGENTS.md created" [ "$(cat "$plain/AGENTS.md")" = "# plain
 
 $import" ]
