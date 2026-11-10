@@ -19,7 +19,9 @@
 #   - creates .claude/settings.json from .starling/claude-settings.json, or
 #     merges Starling's entries into it with jq
 #   - activates Starling's git hooks
-# and prints a summary with the commit header to use. It commits nothing.
+# and prints a summary with the commit header to use, and a hint at the
+# adopt-starling skill where the project has a setup of its own or an
+# update brought new skills. It commits nothing.
 #
 # STARLING_JQ names the jq to use (tests set it to a missing command).
 #
@@ -47,6 +49,17 @@ note() {
 }
 
 old=$(cat .starling/VERSION 2>/dev/null) || old=
+
+# What was here before, for the hint at the adopt-starling skill: the
+# skills of the installed Starling, and whether the project has agent
+# instructions of its own. Its own skills are found while linking.
+old_skills=' '
+for skill in .starling/skills/*/; do
+	[ -d "$skill" ] && old_skills="$old_skills$(basename "$skill") "
+done
+own=
+[ ! -e AGENTS.md ] && [ ! -e CLAUDE.md ] || own=1
+added=
 
 # .starling/: remove, then copy, so that a script still running from the old
 # copy keeps reading its old file.
@@ -87,15 +100,17 @@ fi
 for dir in .claude/skills .agents/skills; do
 	mkdir -p "$dir"
 	for link in "$dir"/*; do
-		[ -L "$link" ] || continue
-		case $(readlink "$link") in
+		[ -e "$link" ] || [ -L "$link" ] || continue
+		case $(readlink "$link" 2>/dev/null) in
 		../../.starling/skills/*) [ -e "$link" ] || rm "$link" ;;
+		*) own=1 ;;
 		esac
 	done
 	for skill in .starling/skills/*/; do
 		[ -d "$skill" ] || continue
 		name=$(basename "$skill")
 		link="$dir/$name"
+		case "$old_skills$added " in *" $name "*) ;; *) added="$added $name" ;; esac
 		if [ ! -e "$link" ] && [ ! -L "$link" ]; then
 			ln -s "../../.starling/skills/$name" "$link"
 		elif [ ! -L "$link" ] || [ "$(readlink "$link")" != "../../.starling/skills/$name" ]; then
@@ -202,3 +217,10 @@ else
 fi
 [ -z "$notes" ] || printf '\nNotes:\n%s' "$notes"
 [ -z "$changes" ] || printf '\nReview the changes, then commit them, e.g. with the commit-changes skill:\n  %s\n' "$header"
+if [ -z "$old" ]; then
+	[ -z "$own" ] || printf '\n%s\n  %s\n' \
+		"This repository has agent instructions or skills of its own. The adopt-starling skill compares them with Starling's and proposes what to replace, keep or move into policy files:" \
+		".starling/skills/adopt-starling/SKILL.md"
+elif [ -n "$added" ]; then
+	printf '\nNew skills:%s. The adopt-starling skill checks whether they replace skills of this repository.\n' "$added"
+fi
