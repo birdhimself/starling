@@ -79,6 +79,9 @@ check, such as whether a commit body explains the cause.
 
 - `tool_used`: a tool was called, with `input_match` (a regular expression
   on the call's input), `min` and `max`. `min: 0, max: 0` means never.
+  The input is matched as JSON, in which a line break of a command is the
+  two characters `\n`: `\brm` does not match an `rm` that starts a line,
+  because the `n` before it is a word character. Leave `\b` and `^` out.
 - `regex`: a `pattern` on the agent's last message, on the whole run with
   `target: trace`, or on a file with
   `target: {source: file, path: <path>}`. `match` is `contains` (the
