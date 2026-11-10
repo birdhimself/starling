@@ -1,0 +1,21 @@
+schema_version: "1.1"
+name: adopt-starling-skip-one-skill
+description: >-
+  Creating one skill belongs to write-skill.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Add a skill that reviews whether every label format in lib/ has a test.
+  max_turns: 40
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+    min: 0
+    max: 0

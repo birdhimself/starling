@@ -1,0 +1,72 @@
+schema_version: "1.1"
+name: adopt-starling-apply-confirmed
+description: >-
+  With the changes confirmed up front, the skill removes the replaced
+  skill, writes the policy file from what that skill said, fixes AGENTS.md
+  and leaves the rest, without committing.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Fit this repository to the Starling we installed. You have my
+    confirmation up front, so don't wait for me: remove every skill of ours
+    that one of Starling's replaces, keep what is specific to us in policy
+    files, and drop the rules in AGENTS.md that Starling's rules repeat or
+    contradict. Keep everything else, and don't commit.
+  max_turns: 60
+  timeout_seconds: 1200
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+  - name: runs-the-survey
+    type: tool_used
+    tool: Bash
+    input_match: adopt-starling/scripts/survey
+  - name: removes-the-replaced-skill
+    type: tool_used
+    tool: Bash
+    input_match: 'rm\s+(-\S+\s+)*\S*create-pr'
+  - name: policy-keeps-the-check
+    type: regex
+    target: {source: file, path: .agents/policy/open-pr.md}
+    pattern: npm run lint
+  - name: policy-keeps-the-label
+    type: regex
+    target: {source: file, path: .agents/policy/open-pr.md}
+    pattern: dashboard
+  - name: drops-the-chore-rule
+    type: regex
+    target: {source: file, path: AGENTS.md}
+    pattern: chore
+    match: not_contains
+  - name: keeps-the-project-rule
+    type: regex
+    target: {source: file, path: AGENTS.md}
+    pattern: npm test
+  - name: keeps-the-other-skill
+    type: regex
+    target: {source: file, path: .agents/skills/review-labels/SKILL.md}
+    pattern: Review labels
+  - name: leaves-starling-alone-with-edit
+    type: tool_used
+    tool: Edit
+    input_match: '"file_path":\s*"[^"]*/\.starling/'
+    min: 0
+    max: 0
+  - name: leaves-starling-alone-with-write
+    type: tool_used
+    tool: Write
+    input_match: '"file_path":\s*"[^"]*/\.starling/'
+    min: 0
+    max: 0
+  - name: never-commits
+    type: tool_used
+    tool: Bash
+    input_match: git\s+commit
+    min: 0
+    max: 0

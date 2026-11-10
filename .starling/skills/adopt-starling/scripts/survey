@@ -1,0 +1,262 @@
+#!/bin/sh
+# Starling: print the facts the adopt-starling skill works from.
+#
+#   survey
+#
+# Compares what a repository has with the Starling installed in it. It only
+# reads. Prints, in this order:
+#
+#   Starling:        the installed version, where it came from and whether
+#                    the install or update is committed
+#   New skills:      Starling's skills that the last install or update brought
+#   Own skills:      the repository's skills, with their descriptions
+#   Name clashes:    entries that keep one of Starling's skills from being
+#                    linked
+#   Starling's skills: each with its description
+#   Policy files:    for each of Starling's skills that reads one, whether
+#                    .agents/policy/<skill>.md exists and what it may hold
+#   Instructions:    AGENTS.md and CLAUDE.md files, and the import line
+#   Hooks:           who owns core.hooksPath, and hooks that Starling's hooks
+#                    do not run
+#   Commit checks:   other tools that check commit messages
+#   Scopes:          the scopes .starling.conf allows and the ones the last
+#                    500 commits used
+#   Settings:        whether .claude/settings.json has Starling's hooks
+#   Renovate:        whether its configuration leaves Starling's files alone
+#
+# Run it anywhere inside the repository.
+#
+# Exit status: 0; 1 where there is nothing to adopt, which is without
+# Starling installed and in Starling's own repository; 2 outside a work tree.
+
+set -u
+LC_ALL=C
+export LC_ALL
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "survey: not inside a git work tree" >&2
+	exit 2
+}
+cd "$top" || exit 2
+
+if [ ! -f .starling/VERSION ]; then
+	if [ -d .starling/skills ]; then
+		echo "survey: this is Starling's own repository, where .starling/ is the source; there is nothing to adopt" >&2
+	else
+		echo "survey: Starling is not installed here; install it first, then run this again" >&2
+	fi
+	exit 1
+fi
+
+# describe FILE: the description from a SKILL.md's frontmatter, on one line.
+describe() {
+	awk '
+		NR == 1 { if ($0 != "---") exit; next }
+		$0 == "---" { exit }
+		/^[A-Za-z0-9_-]+:/ {
+			inside = ($0 ~ /^description:/)
+			if (inside) {
+				v = $0
+				sub(/^description:[ \t]*/, "", v)
+				if (v ~ /^[>|][-+]?[ \t]*$/) v = ""
+				else if (v ~ /^".*"[ \t]*$/ || v ~ /^\047.*\047[ \t]*$/) {
+					sub(/[ \t]*$/, "", v)
+					v = substr(v, 2, length(v) - 2)
+				}
+				d = v
+			}
+			next
+		}
+		inside && /^[ \t]/ {
+			v = $0
+			sub(/^[ \t]+/, "", v)
+			d = (d == "") ? v : d " " v
+		}
+		END { print (d == "" ? "(no description)" : d) }
+	' "$1"
+}
+
+# The version, and the commit to compare with: HEAD while the install or
+# update is not committed, otherwise the parent of the commit that made it.
+version=$(cat .starling/VERSION)
+if [ "$(git show HEAD:.starling/VERSION 2>/dev/null)" = "$version" ]; then
+	state=committed
+	base=$(git log -1 --format=%H -- .starling/VERSION 2>/dev/null)
+	base=${base:+$base^}
+else
+	state="not committed yet"
+	base=HEAD
+fi
+old=
+[ -z "$base" ] || old=$(git show "$base:.starling/VERSION" 2>/dev/null) || old=
+if [ -n "$old" ]; then
+	echo "Starling: $version, updated from $old, $state"
+else
+	echo "Starling: $version, a first install, $state"
+fi
+
+before=' '
+if [ -n "$old" ]; then
+	before=" $(git ls-tree --name-only "$base:.starling/skills" 2>/dev/null | tr '\n' ' ')"
+fi
+theirs=' '
+new=
+for dir in .starling/skills/*/; do
+	[ -f "${dir}SKILL.md" ] || continue
+	name=$(basename "$dir")
+	theirs="$theirs$name "
+	case $before in *" $name "*) ;; *) new="$new $name" ;; esac
+done
+if [ -z "$old" ]; then
+	echo "New skills: all of Starling's"
+else
+	echo "New skills:${new:- none}"
+fi
+
+# The repository's own skills: real directories, not links.
+echo "Own skills:"
+any=
+clashes=
+for base_dir in .agents/skills .claude/skills; do
+	for entry in "$base_dir"/*; do
+		[ -e "$entry" ] || [ -L "$entry" ] || continue
+		name=$(basename "$entry")
+		case $theirs in
+		*" $name "*)
+			[ -L "$entry" ] && [ "$(readlink "$entry")" = "../../.starling/skills/$name" ] ||
+				clashes="$clashes  $entry: keeps Starling's $name skill from being linked there
+"
+			;;
+		esac
+		[ -L "$entry" ] && continue
+		[ -f "$entry/SKILL.md" ] || continue
+		any=1
+		echo "  $name ($entry): $(describe "$entry/SKILL.md")"
+	done
+done
+[ -n "$any" ] || echo "  none"
+echo "Name clashes:"
+if [ -n "$clashes" ]; then printf '%s' "$clashes"; else echo "  none"; fi
+
+echo "Starling's skills:"
+for name in $theirs; do
+	echo "  $name: $(describe ".starling/skills/$name/SKILL.md")"
+done
+
+# Policy files. A skill that reads one says what it may hold, in the
+# paragraph that names the file.
+echo "Policy files:"
+for name in $theirs; do
+	file=.agents/policy/$name.md
+	may=$(awk -v file="$file" '
+		!found && index($0, file) { found = 1 }
+		found { if ($0 ~ /^[ \t]*$/) exit; s = (s == "") ? $0 : s " " $0 }
+		END { print s }
+	' ".starling/skills/$name/SKILL.md")
+	[ -n "$may" ] || continue
+	if [ -f "$file" ]; then
+		echo "  $name: $file exists. $may"
+	else
+		echo "  $name: none. $may"
+	fi
+done
+for file in .agents/policy/*.md; do
+	[ -f "$file" ] || continue
+	name=$(basename "$file" .md)
+	case $theirs in
+	*" $name "*)
+		grep -qF "$file" ".starling/skills/$name/SKILL.md" ||
+			echo "  $file: Starling's $name skill reads no policy file; move its content or remove it"
+		;;
+	*) echo "  $file: Starling has no skill named $name; rename or remove it" ;;
+	esac
+done
+
+echo "Instructions:"
+git ls-files -co --exclude-standard -- AGENTS.md '*/AGENTS.md' CLAUDE.md '*/CLAUDE.md' |
+	grep -v '^\.starling/' | sed 's/^/  /'
+if [ -f AGENTS.md ] && grep -q '@\.starling/AGENTS\.md$' AGENTS.md; then
+	echo "  AGENTS.md imports the shared rules"
+else
+	echo "  AGENTS.md does not import the shared rules; the installer adds the line"
+fi
+[ ! -f CLAUDE.md ] || [ -L CLAUDE.md ] || [ ! -f AGENTS.md ] ||
+	echo "  CLAUDE.md exists next to AGENTS.md; the shared rules keep agent instructions in AGENTS.md"
+
+echo "Hooks:"
+path=$(git config core.hooksPath 2>/dev/null) || path=
+case $path in
+.starling/hooks) echo "  core.hooksPath is .starling/hooks: Starling's hooks are active" ;;
+'') echo "  core.hooksPath is not set: activate Starling's hooks with .starling/bin/activate-hooks" ;;
+*) echo "  core.hooksPath is $path, set by another tool: Starling's hooks do not run until it is unset" ;;
+esac
+for hook in .githooks/*; do
+	[ -f "$hook" ] || continue
+	echo "  $hook: run by Starling's hook of the same name"
+done
+for hook in .husky/*; do
+	[ -f "$hook" ] || continue
+	echo "  $hook: a husky hook, which stops running once husky is gone; move it to .githooks/$(basename "$hook")"
+done
+hooks_dir=$(git rev-parse --git-common-dir 2>/dev/null)/hooks
+for hook in "$hooks_dir"/*; do
+	[ -f "$hook" ] || continue
+	case $hook in *.sample) continue ;; esac
+	echo "  .git/hooks/$(basename "$hook"): not run under core.hooksPath, and not in the repository; move it to .githooks/$(basename "$hook") if it is still wanted"
+done
+for file in .pre-commit-config.yaml lefthook.yml lefthook.yaml .lefthook.yml; do
+	[ ! -f "$file" ] || echo "  $file: another hook manager's configuration"
+done
+
+echo "Commit checks:"
+any=
+for file in commitlint.config.* .commitlintrc .commitlintrc.*; do
+	[ -f "$file" ] || continue
+	any=1
+	echo "  $file: commitlint's configuration; Starling's checker replaces commitlint"
+done
+if [ -f package.json ] && grep -q 'commitlint' package.json; then
+	any=1
+	echo "  package.json names commitlint; Starling's checker replaces it"
+fi
+[ -n "$any" ] || echo "  none besides Starling's"
+
+echo "Scopes:"
+allowed=
+[ ! -f .starling.conf ] || allowed=$(git config --file .starling.conf --get-all commit.scopes 2>/dev/null | tr '\n' ' ')
+echo "  Allowed by .starling.conf: ${allowed:-none}"
+used=$(git log -500 --format=%s 2>/dev/null | awk '
+	match($0, /^[a-z]+\([^)]+\)!?:/) {
+		s = substr($0, 1, RLENGTH)
+		sub(/^[a-z]+\(/, "", s)
+		sub(/\)!?:$/, "", s)
+		count[s]++
+	}
+	END { for (s in count) printf "%d %s\n", count[s], s }
+' | sort -k1,1nr -k2 | awk '{ printf "%s%s (%d)", (NR > 1 ? ", " : ""), $2, $1 } END { if (NR) print "" }')
+echo "  Used in the last 500 commits: ${used:-none}"
+
+echo "Settings:"
+if [ -f .claude/settings.json ] && grep -q '\.starling/bin/deny-hook-bypass' .claude/settings.json &&
+	grep -q '\.starling/bin/activate-hooks' .claude/settings.json; then
+	echo "  .claude/settings.json has Starling's hooks"
+else
+	echo "  .claude/settings.json lacks Starling's hooks; merge .starling/claude-settings.json into it"
+fi
+
+echo "Renovate:"
+renovate=
+for f in renovate.json renovate.json5 .github/renovate.json .github/renovate.json5 \
+	.gitlab/renovate.json .gitlab/renovate.json5 .renovaterc .renovaterc.json .renovaterc.json5; do
+	[ -f "$f" ] && renovate=$f && break
+done
+[ -n "$renovate" ] || [ ! -f package.json ] || ! grep -q '"renovate"[[:space:]]*:' package.json ||
+	renovate=package.json
+if [ -z "$renovate" ]; then
+	echo "  not set up"
+elif grep -qF '.github/workflows/starling-' "$renovate"; then
+	echo "  $renovate leaves Starling's files alone"
+else
+	echo "  $renovate needs this rule in its packageRules:"
+	echo '  {"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "enabled": false}'
+fi

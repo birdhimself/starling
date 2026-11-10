@@ -343,6 +343,20 @@ them:
 - **Scripts for facts, prose for judgment.** Scripts gather state, validate
   and perform mechanical actions. Anything that must never happen is a hook
   or a CI check, not a sentence in a skill.
+- **Adoption is a skill, not the installer's job.** The installer is `sh`
+  and does what needs no judgment. Deciding which of a repository's skills
+  one of Starling's replaces, what belongs in a policy file and which lines
+  of `AGENTS.md` the shared rules made redundant needs a reader, so the
+  `adopt-starling` skill does it, after an install and again after any
+  update. It ships in `.starling/`, so it always describes the installed
+  version, which a prompt in the README could not, and it has eval cases.
+  Its `survey` script gathers the facts, including what each policy file
+  may hold, read from the skills themselves. It proposes everything in one
+  round, writes only what was confirmed and commits nothing, like the
+  installer. It never moves into a policy what the repository did not
+  already say. The shared rules name the skill, because a smaller model
+  asked what an update replaced otherwise compared the files by hand. `adopt-` is its own verb because none of the others ends at
+  uncommitted changes to a repository's setup.
 - **Evals are asked about.** `test-skill` lints and validates every time and
   asks before running eval cases, because they take minutes and the runner
   reports a cost. `write-skill` writes cases where an eval setup exists and

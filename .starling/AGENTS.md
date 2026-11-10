@@ -79,3 +79,6 @@ Starling repository.
 - A repository adapts one of Starling's skills to itself in
   `.agents/policy/<skill>.md`, which that skill reads, never by copying
   or editing the skill.
+- After Starling is installed or updated, the `adopt-starling` skill
+  checks what it replaces among the repository's own skills, rules and
+  hooks. Use it rather than comparing them by hand.

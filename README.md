@@ -68,6 +68,29 @@ Besides `.starling/`, the installer sets up:
 If the project uses Renovate, the installer prints a rule to add to its
 configuration, so that Renovate leaves Starling's files alone.
 
+### In a repository that already has its own setup
+
+The installer cannot judge what a repository already had: skills that one
+of Starling's now replaces, rules in `AGENTS.md` that the shared rules
+repeat or contradict, hooks that another tool ran. The `adopt-starling`
+skill compares the two, proposes what to remove, what to keep and what to
+move into [policy files](#adapting-a-project), and changes only what you
+confirm. To install and adopt in one go, paste this into your agent:
+
+```text
+Install Starling in this repository:
+
+curl -fsSL https://raw.githubusercontent.com/birdhimself/starling/main/install | sh
+
+Then follow .starling/skills/adopt-starling/SKILL.md to fit the repository
+to it. Show me the proposal before you change anything, and commit nothing.
+```
+
+The prompt names the file so that it works even when the agent has not
+picked up the newly linked skills yet. Later, `/adopt-starling` does the
+same, for instance after an update that brought a skill one of your own
+overlaps.
+
 ## After cloning
 
 `core.hooksPath` is local to a clone, so each clone activates the hooks
@@ -117,7 +140,8 @@ do not touch it.
 | Add a skill of its own         | `.agents/skills/<name>/`, linked from `.claude/skills/<name>`. `write-skill` does this. |
 
 The names of Starling's skills are reserved. When a project already has an
-entry with one of those names, the installer leaves it alone and says so.
+entry with one of those names, the installer leaves it alone and says so,
+and `adopt-starling` proposes whether to replace or rename it.
 
 `.starling.conf` is in git's config format:
 
@@ -148,6 +172,7 @@ No skill merges a pull request.
 | `ship-issue`             | Implements an issue, has a fresh agent review it and applies the findings.   | Ready pull requests             |
 | `ship-issue-batch`       | Does the same for several issues in parallel, optionally as one stack.       | Ready pull requests             |
 | `clean-merged-branches`  | Deletes local branches whose work is on the base branch, after confirmation. | Deleted branches                |
+| `adopt-starling`         | Fits a repository's own skills, rules and hooks to the installed Starling.   | Changed files, never committed  |
 | `write-skill`            | Creates or changes a skill by Starling's rules.                              | Skill files                     |
 | `test-skill`             | Lints and validates skills, and runs their evals if you agree.               | Report                          |
 

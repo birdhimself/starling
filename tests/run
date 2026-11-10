@@ -832,6 +832,75 @@ assert "install: import line first without a heading" [ "$(sed -n 1p "$husky/AGE
 assert "install: project skill untouched" real_dir "$husky/.claude/skills/commit-changes"
 assert "install: hooks path left to husky" [ "$(git -C "$husky" config core.hooksPath)" = .husky/_ ]
 assert "install: settings untouched without jq" [ "$(cat "$husky/.claude/settings.json")" = '{"model": "opus"}' ]
+
+# adopt-starling's survey script, in the targets above. $husky has an
+# install that is not committed, a project skill with one of Starling's
+# names and husky's hooks path.
+survey="$root/.starling/skills/adopt-starling/scripts/survey"
+surveyed() { # NAME WANT: the last survey printed WANT
+	if printf '%s\n' "$out" | grep -qF -- "$2"; then ok; else bad "survey: $1" "expected \"$2\" in:
+$out"; fi
+}
+expect "$husky" "survey: a first install" 0 "Starling: v0.1.0, a first install, not committed yet" "$survey"
+surveyed "every skill is new" "New skills: all of Starling's"
+surveyed "a project skill" "  commit-changes (.claude/skills/commit-changes): (no description)"
+surveyed "a name clash" "  .claude/skills/commit-changes: keeps Starling's commit-changes skill from being linked there"
+surveyed "Starling's skill" "  open-pr: Opens a pull request"
+surveyed "what a policy may hold" '  open-pr: none. If `.agents/policy/open-pr.md` exists, read it first. It holds'
+surveyed "another tool's hooks path" "core.hooksPath is .husky/_, set by another tool"
+surveyed "settings without Starling's hooks" ".claude/settings.json lacks Starling's hooks"
+surveyed "no scopes" "  Used in the last 500 commits: none"
+if printf '%s\n' "$out" | grep -q '^  commit-changes: .*agents/policy'; then
+	bad "survey: no policy line for a skill that reads none" "$out"
+else ok; fi
+
+# $tgt is at v0.1.0, committed as an update from v0.2.0, which had no
+# commit-changes skill. Give it what a project brings along.
+{
+	mkdir -p "$tgt/.agents/policy" "$tgt/.githooks" "$tgt/.husky" "$tgt/docs" &&
+		echo "# Checks" >"$tgt/.agents/policy/open-pr.md" &&
+		echo "# Old" >"$tgt/.agents/policy/review-retired.md" &&
+		echo "# Messages" >"$tgt/.agents/policy/commit-changes.md" &&
+		echo "# Old rules" >"$tgt/CLAUDE.md" && echo "# Docs" >"$tgt/docs/AGENTS.md" &&
+		echo "#!/bin/sh" >"$tgt/.githooks/pre-commit" && echo "#!/bin/sh" >"$tgt/.husky/pre-push" &&
+		echo "#!/bin/sh" >"$tgt/.git/hooks/post-merge" &&
+		echo "module.exports = {};" >"$tgt/commitlint.config.js" &&
+		printf '{"renovate": {"extends": []}}\n' >"$tgt/package.json" &&
+		printf '[commit]\n\tscopes = api\n\tscopes = ui\n' >"$tgt/.starling.conf" &&
+		commit_all "$tgt" "feat(api): one" && echo a >"$tgt/a" && commit_all "$tgt" "fix(api)!: two" &&
+		echo b >"$tgt/b" && commit_all "$tgt" "feat(web): three"
+} || exit 2
+expect "$tgt" "survey: an update" 0 "Starling: v0.1.0, updated from v0.2.0, committed" "$survey"
+surveyed "the skill an update brought" "New skills: commit-changes"
+for section in "Own skills:" "Name clashes:"; do
+	if [ "$(printf '%s\n' "$out" | sed -n "/^$section\$/{n;p;}")" = "  none" ]; then ok; else
+		bad "survey: nothing under $section" "$out"
+	fi
+done
+surveyed "a policy file" "  open-pr: .agents/policy/open-pr.md exists. If"
+surveyed "a policy file for no skill" ".agents/policy/review-retired.md: Starling has no skill named review-retired"
+surveyed "a policy file its skill does not read" \
+	".agents/policy/commit-changes.md: Starling's commit-changes skill reads no policy file"
+surveyed "nested instructions" "  docs/AGENTS.md"
+surveyed "CLAUDE.md next to AGENTS.md" "CLAUDE.md exists next to AGENTS.md"
+surveyed "the import line" "AGENTS.md imports the shared rules"
+surveyed "active hooks" "core.hooksPath is .starling/hooks"
+surveyed "a project hook" "  .githooks/pre-commit: run by Starling's hook of the same name"
+surveyed "a husky hook" "  .husky/pre-push: a husky hook"
+surveyed "a hook in .git/hooks" "  .git/hooks/post-merge: not run under core.hooksPath"
+surveyed "commitlint" "  commitlint.config.js: commitlint's configuration"
+surveyed "allowed scopes" "  Allowed by .starling.conf: api ui"
+surveyed "used scopes" "  Used in the last 500 commits: api (2), web (1)"
+surveyed "Renovate without the rule" "  package.json needs this rule in its packageRules:"
+if [ "$has_jq" = 1 ]; then surveyed "settings with Starling's hooks" ".claude/settings.json has Starling's hooks"; fi
+expect "$fmt" "survey: Renovate with the rule" 0 "  renovate.json5 leaves Starling's files alone" "$survey"
+surveyed "a committed first install" "Starling: v0.2.0, a first install, committed"
+surveyed "no other commit checks" "  none besides Starling's"
+
+git init -q "$tmp/bare" || exit 2
+expect "$tmp/bare" "survey: without Starling" 1 "Starling is not installed here" "$survey"
+expect "$root" "survey: in Starling's own repository" 1 "Starling's own repository" "$survey"
+expect "$tmp" "survey: outside a repository" 2 "not inside a git work tree" "$survey"
 unset STARLING_REPO
 
 # Ranges, checked as CI checks them.

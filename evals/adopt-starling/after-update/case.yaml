@@ -1,0 +1,50 @@
+schema_version: "1.1"
+name: adopt-starling-after-update
+description: >-
+  After an update that brought the open-pr skill, the skill finds that it
+  replaces the project's create-pr skill and proposes that, changing
+  nothing.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    I just updated Starling and haven't committed that yet. Does the update
+    replace anything of ours?
+  max_turns: 40
+  timeout_seconds: 900
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+  - name: runs-the-survey
+    type: tool_used
+    tool: Bash
+    input_match: adopt-starling/scripts/survey
+  - name: names-the-replaced-skill
+    type: regex
+    pattern: create-pr
+  - name: names-the-new-skill
+    type: regex
+    pattern: open-pr
+  - name: removes-nothing-yet
+    type: tool_used
+    tool: Bash
+    input_match: 'rm\s+(-\S+\s+)*\S*create-pr'
+    min: 0
+    max: 0
+  - name: writes-no-policy-yet
+    type: tool_used
+    tool: Write
+    input_match: '\.agents/policy/'
+    min: 0
+    max: 0
+  - name: never-commits
+    type: tool_used
+    tool: Bash
+    input_match: git\s+commit
+    min: 0
+    max: 0
