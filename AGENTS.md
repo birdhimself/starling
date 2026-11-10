@@ -48,12 +48,19 @@ them, after asking; by hand:
 ```sh
 claude plugin eval . --tag commit-changes -j 3 --scaffold \
   --allow-tools Bash Read Write Edit Glob Grep Skill --ablation none \
-  --trust-plugin --no-publish --judge-model sonnet --max-cost-usd 10
+  --trust-plugin --no-publish --model sonnet --judge-model sonnet \
+  --max-cost-usd 10
 ```
 
-- The runner reports the cost at API prices: about $5 for the nine
-  `commit-changes` cases at three runs each. Pilot a new or changed case
-  with `--case <name> --runs 1`.
+- `--model sonnet` runs the cases on a smaller model than a session usually
+  has: it costs less, and a skill that only the strongest model can follow
+  is not finished. `--model haiku` is a harder pass still, at about a cent
+  a run: read its failures for gaps in a skill's wording, but it also
+  answers some requests without loading any skill, so it is not the gate.
+- The runner reports the cost at API prices. On Sonnet: about $3 for the
+  eight `adopt-starling` cases at three runs each, and about $8 for every
+  skill's "does-not-use-the-skill" cases (`--case '*-skip-*'`). Pilot a new
+  or changed case with `--case <name> --runs 1`.
 - The runner turns off git hooks and graders cannot run commands, so cases
   grade what git writes itself: `.git/logs/HEAD` and `.git/COMMIT_EDITMSG`.
 - On macOS, the runner's sandbox cannot use Apple's `/usr/bin/git`, which

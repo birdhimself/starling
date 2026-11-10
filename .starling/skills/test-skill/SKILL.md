@@ -70,7 +70,7 @@ When the user agrees, run each skill's cases from the repository root:
 
 ```sh
 claude plugin eval . --tag <skill> -j 3 --scaffold --trust-plugin \
-  --no-publish --ablation none --judge-model sonnet \
+  --no-publish --ablation none --model sonnet --judge-model sonnet \
   --allow-tools Bash Read Write Edit Glob Grep Skill
 ```
 
@@ -78,6 +78,8 @@ claude plugin eval . --tag <skill> -j 3 --scaffold --trust-plugin \
   which build each case's fixture repository; pass them only for this
   repository's cases.
 - `--ablation none` keeps graders that check the skill was loaded counting.
+- `--model sonnet` runs every case on Sonnet, whatever model the session
+  uses: a skill must work on a smaller model too, and the runs cost less.
 - A case's score is the share of its graders that passed, averaged over its
   runs. The command exits 1 when a case scores below 1.0.
 - On macOS, the runner's sandbox cannot run Apple's `/usr/bin/git`; another
