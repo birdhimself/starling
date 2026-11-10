@@ -73,6 +73,7 @@ where the skill ends:
 | `commit-`    | creates commits                                            | local commits, never pushed       |
 | `write-`     | creates or updates files of its kind                       | files                             |
 | `test-`      | runs a suite, changes nothing                              | report                            |
+| `adopt-`     | fits a repository to what was installed in it              | changed files, never committed    |
 
 - A skill whose job fits no verb is a sign that it has two purposes. A new
   verb is added to this table in Starling, with its meaning and end point,

@@ -1,0 +1,40 @@
+schema_version: "1.1"
+name: adopt-starling-not-installed
+description: >-
+  Without Starling installed, the skill stops and gives the install
+  command instead of running it or changing the repository.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Adopt Starling in this repository: move our skills and rules over to it.
+  max_turns: 20
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: uses-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+  - name: gives-the-install-command
+    type: regex
+    pattern: 'raw\.githubusercontent\.com/birdhimself/starling/main/install'
+  - name: does-not-run-the-installer
+    type: tool_used
+    tool: Bash
+    input_match: 'curl[^\n]*starling/main/install'
+    min: 0
+    max: 0
+  - name: removes-nothing
+    type: tool_used
+    tool: Bash
+    input_match: 'rm\s+(-\S+\s+)*\S*create-pr'
+    min: 0
+    max: 0
+  - name: writes-nothing
+    type: tool_used
+    tool: Write
+    min: 0
+    max: 0

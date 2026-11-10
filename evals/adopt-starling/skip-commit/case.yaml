@@ -1,0 +1,25 @@
+schema_version: "1.1"
+name: adopt-starling-skip-commit
+description: >-
+  Committing the adoption's changes belongs to commit-changes.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    We moved our pull request skill over to Starling's. Commit that.
+  max_turns: 25
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+    min: 0
+    max: 0
+  - name: commits
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: "\tcommit: "

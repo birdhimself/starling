@@ -1,0 +1,25 @@
+schema_version: "1.1"
+name: adopt-starling-skip-update
+description: >-
+  Updating Starling is the update script's job, not the skill's.
+tags: [adopt-starling]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: >-
+    Update Starling to the newest release.
+  max_turns: 15
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
+runs: 3
+graders:
+  - name: does-not-use-the-skill
+    type: tool_used
+    tool: Skill
+    input_match: adopt-starling
+    min: 0
+    max: 0
+  - name: runs-the-update-script
+    type: tool_used
+    tool: Bash
+    input_match: '\.starling/bin/update'
