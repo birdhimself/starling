@@ -1,8 +1,9 @@
 schema_version: "1.1"
-name: write-skill-skip-starling-skill
+name: write-skill-decline-starling-skill
 description: >-
   A change to one of Starling's skills from a project is not made there:
-  .starling/ is replaced on every update.
+  .starling/ is replaced on every update. Loading the skill to learn that
+  is fine; changing the skill is not.
 tags: [write-skill]
 context:
   scaffold_script: scaffold.sh
@@ -14,12 +15,6 @@ execution:
   allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
 runs: 3
 graders:
-  - name: does-not-use-the-skill
-    type: tool_used
-    tool: Skill
-    input_match: write-skill
-    min: 0
-    max: 0
   - name: leaves-starling-alone-with-edit
     type: tool_used
     tool: Edit

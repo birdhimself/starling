@@ -1,6 +1,6 @@
 ---
 name: write-skill
-description: Creates, changes, renames or splits a skill by Starling's rules for skills, with one purpose, a contract, a verb-object name and a description that says when to use it and when not. It places and links the skill for Claude Code and Codex, writes its eval cases, and tests it with test-skill until the lint passes. Use when asked to create, write, add, change, rename or split a skill, or to turn a repeated workflow into a skill. Do not use for checking a skill without changing it (use `test-skill`), for changing Starling's own skills from another repository, which happens in Starling, or for editing AGENTS.md or other agent instructions.
+description: Creates, changes, renames or splits a skill by Starling's rules for skills, with one purpose, a contract, a verb-object name and a description that says when to use it and when not. It places and links the skill for Claude Code and Codex, writes its eval cases, and tests it with test-skill until the lint passes. Use when asked to create, write, add, change, rename or split a skill, or to turn a repeated workflow into a skill. Do not use for checking a skill without changing it (use `test-skill`), or for editing AGENTS.md or other agent instructions.
 argument-hint: "<what the skill should do, or the skill to change>"
 ---
 
@@ -19,8 +19,10 @@ Paths are relative to the repository root.
   repository has an eval setup, or with the user's agreement a new one; a
   lint that passes; a report.
 - **Never:** change `.starling/` in a repository other than Starling's
-  own, since every update replaces it; commit, which is the caller's; run
-  eval cases without the user's agreement.
+  own, since every update replaces it: asked to change one of Starling's
+  skills there, change nothing and say that the change belongs in
+  Starling's repository; commit, which is the caller's; run eval cases
+  without the user's agreement.
 
 ## 1. Gather the facts
 
