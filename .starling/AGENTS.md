@@ -35,7 +35,8 @@ Starling repository.
   changes, end its message with `Co-authored-by: <model> <address>` for the
   model actually running, in exactly this casing, e.g.
   `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>`. Committing
-  someone else's edits does not count.
+  someone else's edits does not count. This replaces any trailer your
+  agent adds by default: write this one, and only this one.
 
 ## Branches and pull requests
 
@@ -60,7 +61,7 @@ Starling repository.
   e.g. `🤖 Generated with Claude Code using Claude Opus 5.5`. Name the model
   actually running; if you do not know it, name only the agent.
   When you edit such text, keep one such line. This replaces Claude Code's
-  own line, which names no model and which Starling's settings turn off.
+  own line, which names no model: write this one, and only this one.
 
 ## Instruction files
 

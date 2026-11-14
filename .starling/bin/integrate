@@ -166,11 +166,15 @@ if [ -n "$renovate" ] && ! grep -qF '.github/workflows/starling-' "$renovate"; t
 fi
 
 # Claude Code settings. Starling owns its attribution keys and every hook
-# command under .starling/bin/; the project's other settings stay.
+# command under .starling/bin/; the project's other settings stay. Earlier
+# versions set attribution.commit and attribution.pr to "", which makes
+# Claude Code tell agents to leave out the lines the shared rules ask for,
+# so those are removed; any other value is the project's own and stays.
 jq=${STARLING_JQ:-jq}
 filter='
 def starling: (.command? // "") | test("\\.starling/bin/");
-.attribution = ((.attribution // {}) + $s[0].attribution)
+.attribution = (((.attribution // {}) + $s[0].attribution)
+	| with_entries(select(((.key == "commit" or .key == "pr") and .value == "") | not)))
 | .hooks = (
 	((.hooks // {}) | with_entries(.value |= [.[] | .hooks |= map(select(starling | not)) | select((.hooks | length) > 0)]))
 	| reduce ($s[0].hooks | to_entries[]) as $e (.; .[$e.key] = ((.[$e.key] // []) + $e.value))
@@ -187,7 +191,7 @@ elif command -v "$jq" >/dev/null 2>&1 &&
 			note "jq rewrote .claude/settings.json to merge Starling's entries. If Prettier formats it, run Prettier on it before committing."
 	fi
 else
-	note "Merge .starling/claude-settings.json into .claude/settings.json by hand (jq is missing or could not read the file): Starling's attribution keys, and its hooks in place of any hook commands under .starling/bin/."
+	note "Merge .starling/claude-settings.json into .claude/settings.json by hand (jq is missing or could not read the file): Starling's attribution keys, without an empty attribution.commit or attribution.pr, and its hooks in place of any hook commands under .starling/bin/."
 fi
 
 # Git hooks.
