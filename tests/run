@@ -795,9 +795,17 @@ rule='{"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "
 	git init -q "$fmt" && printf '{"devDependencies": {"prettier": "3.9.10"}}\n' >"$fmt/package.json" &&
 		printf '{\n  extends: ["config:recommended"],\n}\n' >"$fmt/renovate.json5" &&
 		printf 'dist/' >"$fmt/.prettierignore" && mkdir "$fmt/.claude" &&
-		echo '{"model": "opus"}' >"$fmt/.claude/settings.json" && commit_all "$fmt" "docs: start"
+		echo '{"model": "opus", "attribution": {"commit": "", "pr": "By us"}}' >"$fmt/.claude/settings.json" &&
+		commit_all "$fmt" "docs: start"
 } || exit 2
 expect "$fmt" "install: with Prettier" 0 "M .prettierignore" "$root/install"
+if [ "$has_jq" = 1 ]; then
+	if grep -q '"commit"' "$fmt/.claude/settings.json"; then
+		bad "install: empty attribution.commit removed" "$(cat "$fmt/.claude/settings.json")"
+	else ok; fi
+	assert "install: the project's attribution.pr kept" grep -q '"pr": "By us"' "$fmt/.claude/settings.json"
+	assert "install: sessionUrl set" grep -q '"sessionUrl": false' "$fmt/.claude/settings.json"
+fi
 assert "install: Prettier ignores .starling/" [ "$(cat "$fmt/.prettierignore")" = "dist/
 
 # Starling's files are managed by Starling and replaced on every update.

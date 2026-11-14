@@ -74,7 +74,8 @@ including its own skills and `.starling.conf`.
   (pruned when a skill is gone; a project's own entry of the same name is
   left alone and reported), `starling-*.yml` workflows (with the default
   branch from `origin/HEAD`; pruned when gone), `.claude/settings.json`
-  (created, or merged with `jq`: Starling's attribution keys, and hook
+  (created, or merged with `jq`: Starling's attribution keys, without the
+  empty `commit` and `pr` of earlier versions, and hook
   commands under `.starling/bin/` replaced; without `jq`, a note), and the
   hook activation (its note passed on).
 - Formatters and bots: every update replaces `.starling/` and the workflows,
@@ -302,14 +303,18 @@ Rules that must hold are enforced; instructions explain them.
 installer says what to merge). Starling's own `.claude/settings.json` is the
 same file, which a test checks.
 
-- `attribution.commit: ""`: Claude Code's built-in trailer is turned off so
-  every agent follows the same `Co-authored-by` rule, with correct casing
-  and the actual model name. A fixed attribution text could not name the
-  model.
-- `attribution.pr: ""`: Claude Code's "Generated with Claude Code" line
-  names no model and covers only pull requests. The shared rules ask instead
-  for a line under every pull request, issue, comment and review an agent
-  posts.
+- `attribution.commit` and `attribution.pr` are not set. The shared rules
+  ask for their own lines instead of Claude Code's: a `Co-authored-by`
+  trailer with correct casing and the actual model name, and a line under
+  every pull request, issue, comment and review an agent posts. A fixed
+  attribution text could not name the model. Starling used to set both to
+  `""` to turn Claude Code's lines off, but with that value Claude Code told
+  the session to add no attribution lines "even if a CLAUDE.md or memory
+  rule asks for attribution lines", and agents then left out Starling's
+  lines too. Unset, the documented behaviour is that the project's own
+  instructions about attribution take precedence over Claude Code's lines.
+  `integrate` removes the empty strings an earlier version put in a
+  project's settings, and leaves any other value alone.
 - `attribution.sessionUrl: false`: no `Claude-Session` trailer or pull
   request link.
 - `SessionStart` runs `activate-hooks || true`: exit 0 is what lets its
@@ -425,8 +430,10 @@ Checked on 2026-11-07 and 2026-11-08 with Claude Code 2.1.319, Codex
   directory, the same as from a copy.
 - Claude Code runs project `SessionStart` and `PreToolUse` hooks in headless
   sessions.
-- Claude Code settings: `attribution.commit` (the commit trailer text, `""`
-  hides it), `attribution.pr`, `attribution.sessionUrl` (`false` drops the
+- Claude Code settings: `attribution.commit` (the commit trailer text; `""`
+  hides it, and was seen to make Claude Code tell the agent to add no
+  attribution lines whatever the project's rules say), `attribution.pr`
+  (the same for pull requests), `attribution.sessionUrl` (`false` drops the
   `Claude-Session` trailer and the pull request link).
 - `git interpret-trailers --parse` reads only the last paragraph: a `Note:`
   line in the middle of the body is not a trailer, and a blank line between
