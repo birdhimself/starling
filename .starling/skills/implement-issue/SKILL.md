@@ -105,11 +105,11 @@ with the type the commits will have.
 
 - One pull request:
   `git fetch origin && git switch --no-track -c <branch> origin/<default branch>`
-- A stack needs `gh stack`; if `gh stack --help` fails, stop and say the
-  extension is missing. Create every branch up front, bottom first:
-  `gh stack init <branch-1> <branch-2> ...`, then check with
-  `gh stack view --short`. `gh stack bottom`, `up`, `down` and
-  `checkout <branch>` move between them.
+- A stack: create every branch up front, bottom first, with
+  `.starling/bin/forge stack init <branch-1> <branch-2> ...`, which
+  leaves you on the bottom one. If it says a tool is missing, stop and
+  say so. `.starling/bin/forge stack view` lists the branches, and
+  `stack bottom`, `up`, `down` and `checkout <branch>` move between them.
 
 ## 6. Implement
 
@@ -142,17 +142,19 @@ environment or services explicitly. Write the body to a file:
 .starling/bin/forge pr create --draft --title "<plain sentence>" --body-file <path>
 ```
 
-For a stack, `gh stack submit --auto` creates draft pull requests with
-generated titles; correct each with
+For a stack, `.starling/bin/forge stack submit --auto` pushes every
+branch and creates draft pull requests with generated titles, each based
+on the branch below; correct each with
 `.starling/bin/forge pr edit <number> --title "..." --body-file <path>`.
 
 ## 8. Keep a stack healthy
 
-`gh stack sync` fetches, fast-forwards the base, rebases each branch onto
-its parent and pushes with lease. Run it after the base moves or after you
-amend a lower branch, then `gh stack submit` again. On a conflict, sync
-restores the branches; resolve it with `gh stack rebase`. Never merge the
-base into a branch.
+`.starling/bin/forge stack sync` fetches, rebases each branch onto the
+one below and the bottom one onto the base, and pushes with lease. Run it
+after the base moves or after you amend a lower branch. On a conflict,
+resolve it with `.starling/bin/forge stack rebase`: fix the files,
+`git add` them, and run it again with `--continue`. Never merge the base
+into a branch.
 
 ## 9. Report
 
@@ -169,4 +171,5 @@ by this issue when it builds on this change.
 - The issue is unready, closed, already implemented or blocked → stop as
   "Read the whole thread" says.
 - The policy marks the work as needing agreement first → get it.
-- A stack is needed and `gh stack` is missing → stop and say so.
+- A stack is needed and `.starling/bin/forge stack` says a tool is missing
+  → stop and say so.

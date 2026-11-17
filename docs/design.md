@@ -229,6 +229,31 @@ Starling works in repositories on GitHub and on Forgejo.
   the policy of `triage-issue`; Starling picks none. Issue fields exist on
   GitHub only and keep going through `forge api`, with ids from the
   policy.
+- **Review threads.** GitHub has thread objects, in GraphQL only. Forgejo
+  has none: the comments on one line of one file are a conversation, so
+  the wrapper groups them, names a thread after its first comment, and
+  replies with a review of one comment on that line. Forgejo's API cannot
+  resolve a conversation, so `pr resolve` fails there by name and
+  `resolve-review-threads` reports the threads it answered but could not
+  resolve.
+- **Stacks.** On GitHub `forge stack` is the `gh stack` extension, passed
+  through, because GitHub has stacks of its own that merge in one step. On
+  Forgejo a stack is only a chain of pull requests, each based on the
+  branch below, so the wrapper keeps it: the order in a file in the git
+  directory, as `gh stack` keeps its own, and with each branch the tip the
+  branch below had when it was last put onto it. A rebase replays what
+  follows that tip, which is what makes an amended lower branch work:
+  rebasing onto the new branch alone would replay the old versions of its
+  commits and conflict. `stack sync` drops a branch whose pull request
+  merged and sets the bases, since Forgejo does not move a pull request
+  off a merged base by itself. `stack merge` fails there: the pull
+  requests merge one at a time.
+- **Reviews take a range, not a pull request number.** The reviewers of
+  `ship-issue` and `ship-issue-batch` run `/code-review` on
+  `origin/<base>...<head commit>`. A number makes `/code-review` look the
+  pull request up itself, which it can only do on some forges, and the
+  range is also the right diff for a pull request in a stack, whose base
+  is not the default branch.
 - **Scripts find the wrapper next to themselves,** and `STARLING_FORGE`
   names another one, which is how the tests put a fake in its place. The
   wrapper itself is tested against a fake `curl` and a fake `gh`.
@@ -410,7 +435,8 @@ The rules for skills are in
 `.starling/skills/write-skill/references/rules.md`, with
 `.starling/skills/write-skill/references/evals.md` for eval cases, because
 projects need them too. The lint in `test-skill` checks the mechanical ones,
-and a test keeps its verbs equal to the naming table. The reasons behind
+a test keeps its verbs equal to the naming table, and another that none
+of Starling's skills names `gh`. The reasons behind
 them:
 
 - **Where skills live.** Starling's are in `.starling/skills/`, linked from
@@ -554,6 +580,10 @@ Checked on 2026-11-17 with Forgejo 15.0.11 and Forgejo Runner 12.13.2.
   when its output is not a terminal.
 - Forgejo takes label names when labels are added to or removed from an
   issue or a pull request, and only label ids when an issue is created.
+- Forgejo's API lists a review's comments with a `resolver`, null while
+  unresolved, and has no endpoint that resolves one.
+- After a pull request merged, the one based on its branch kept that
+  base until it was set to the default branch through the API.
 - An issue's dependencies are read at `issues/<n>/dependencies` and
   `issues/<n>/blocks`, and written with the other issue's owner,
   repository and number.

@@ -124,8 +124,14 @@ must not run.
   from the root.
 - Never restate `AGENTS.md` or the shared rules; they are loaded anyway.
   Name the skill or the rule instead.
-- Never hard-code the repository. `gh` uses the current one; for
-  `gh api`, write `repos/{owner}/{repo}/...`, which `gh` fills in.
+- Starling's skills reach the forge through `.starling/bin/forge`, never
+  through one forge's own command line tool: they must work on every
+  forge, and must not show a command that does nothing in the repository
+  they run in. They name a forge only for what exists on that forge alone.
+  A repository's own skill may use the wrapper too, or its forge's tool.
+- Never hard-code the repository. The wrapper uses the current one; for
+  `.starling/bin/forge api`, write `repos/{owner}/{repo}/...`, which it
+  fills in.
 - Keep the terms consistent: one word for one thing throughout.
 - No statements that go stale, such as "the new API" or "as of this
   month"; describe what is true.

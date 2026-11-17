@@ -30,6 +30,6 @@ graders:
 - name: creates-no-branch
   type: tool_used
   tool: Bash
-  input_match: 'git (switch|checkout)\s+(--no-track\s+)?-[cb]|gh stack init'
+  input_match: 'git (switch|checkout)\s+(--no-track\s+)?-[cb]|(forge|gh) stack init'
   min: 0
   max: 0

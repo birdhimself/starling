@@ -9,6 +9,10 @@
 #   forge pr ready PR
 #   forge pr checks PR [--log-failed]
 #   forge pr checkout PR
+#   forge pr comments PR
+#   forge pr threads PR [--all]
+#   forge pr reply PR THREAD --body TEXT
+#   forge pr resolve PR THREAD
 #   forge runs COMMIT
 #   forge issue view ISSUE
 #   forge issue list [--label LABEL] [--state open|closed]
@@ -19,6 +23,16 @@
 #   forge issue block ISSUE --by ISSUE [--remove]
 #   forge issue sub ISSUE --of ISSUE [--remove]
 #   forge label list
+#   forge stack init [--base BRANCH] BRANCH...
+#   forge stack add BRANCH
+#   forge stack view
+#   forge stack checkout BRANCH
+#   forge stack bottom | top | up | down
+#   forge stack rebase [--upstack | --continue | --abort]
+#   forge stack push
+#   forge stack submit --auto
+#   forge stack sync
+#   forge stack merge PR
 #   forge api [-X METHOD] [--input FILE] PATH
 #
 # Skills and scripts call this instead of a forge's own tool, so that they
@@ -48,6 +62,15 @@
 #              unless every check passed or was skipped, also when there is
 #              none. --log-failed prints the logs of the failed ones instead.
 # pr checkout  switches to the pull request's head branch, fetching it.
+# pr comments  prints the comments on a pull request and the summaries of
+#              its reviews, oldest first, each as "AUTHOR, KIND:" and the
+#              text, indented.
+# pr threads   prints each unresolved review thread as "Thread ID on
+#              FILE:LINE", with ", outdated" or ", resolved" where it
+#              applies, then every comment as "AUTHOR: text", indented.
+#              --all includes the resolved ones.
+# pr reply     answers in a review thread, by the ID pr threads printed.
+# pr resolve   resolves a review thread, by that ID.
 # runs         prints one "ID STATE" line per CI run on COMMIT: STATE is
 #              completed or pending.
 # issue view   prints an issue's title, state, author, type, labels and
@@ -68,6 +91,24 @@
 # issue sub    makes the first issue a sub-issue of the second, or with
 #              --remove no longer one.
 # label list   prints the repository's labels, one per line.
+# stack        manages a stack: branches that each build on the one below,
+#              with one pull request each whose base is the branch below.
+#              init creates the branches, bottom first, adopting those that
+#              exist, and switches to the bottom one; add puts a new branch
+#              on top. view prints the branches, top first, with their pull
+#              requests. checkout, bottom, top, up and down switch between
+#              them. rebase puts each branch onto the one below and the
+#              bottom one onto the fetched base branch, --upstack only the
+#              branches above the current one; after a conflict is resolved,
+#              --continue goes on. push pushes every branch with lease.
+#              submit --auto pushes and opens a draft pull request for each
+#              branch that has none, titled after its first commit. sync
+#              fetches, drops branches whose pull request merged, rebases,
+#              pushes and sets each pull request's base. merge merges every
+#              pull request up to and including PR in one step.
+#              On GitHub this is the gh stack extension, which takes more
+#              options. On Forgejo the stack is kept in the git directory,
+#              and merge fails: there the pull requests merge one at a time.
 # api          calls the forge's own API and prints the response. PATH is
 #              the forge's, without its /api/v1 prefix on Forgejo; {owner}
 #              and {repo} stand for this repository. --input sends a file as
@@ -76,7 +117,8 @@
 #
 # Forgejo has no issue types and no sub-issues: --type and issue sub fail
 # there, saying so, and issue view and issue relations print "not on this
-# forge" in their place.
+# forge" in their place. Its API cannot resolve a review thread either, so
+# pr resolve fails there, saying so.
 #
 # A draft on Forgejo is a title that starts with "WIP:". The subcommands add
 # and remove the prefix, and titles are given and printed without it. When
@@ -574,6 +616,131 @@ pr_checkout() {
 	fi
 }
 
+pr_comments() {
+	[ $# -eq 1 ] || usage
+	pr=$(number "$1") || exit 2
+	# shellcheck disable=SC2016
+	print='sort_by(.at) | .[] | "\(.author), \(.kind):", (.body | gsub("\r"; "") | gsub("(?m)^"; "  ")), ""'
+	if [ "$kind" = github ]; then
+		need_gh
+		gh pr view "$pr" --json comments,reviews --jq "
+			[(.comments[] | {at: .createdAt, author: .author.login, kind: \"comment\", body}),
+			(.reviews[] | select(.body != \"\") | {at: .submittedAt, author: .author.login, kind: \"review, \(.state | ascii_downcase)\", body})]
+			| $print" || exit 1
+		return
+	fi
+	forgejo_target
+	comments=$(forgejo_pages "repos/$target/issues/$pr/comments?") || exit 1
+	reviews=$(forgejo_pages "repos/$target/pulls/$pr/reviews?") || exit 1
+	jq -rn --argjson comments "$comments" --argjson reviews "$reviews" "
+		[(\$comments[] | {at: .created_at, author: .user.login, kind: \"comment\", body}),
+		(\$reviews[] | select((.body // \"\") != \"\") | {at: .submitted_at, author: .user.login, kind: \"review, \(.state | ascii_downcase)\", body})]
+		| $print"
+}
+
+# forgejo_threads PR: the review comments of a pull request as threads, a
+# JSON array. Forgejo has no thread object: the comments on one line of one
+# file are a conversation, and resolving one marks each of them. A thread's
+# id is that of its first comment.
+forgejo_threads() {
+	reviews=$(forgejo_pages "repos/$target/pulls/$1/reviews?") || return 1
+	for review in $(printf '%s' "$reviews" | jq -r '.[] | select(.comments_count > 0) | .id'); do
+		forgejo_request GET "repos/$target/pulls/$1/reviews/$review/comments" || return 1
+	done | jq -s 'add // [] | group_by([.path, .position, .original_position]) | map(sort_by(.id) | {
+		id: .[0].id, path: .[0].path, position: .[0].position, original_position: .[0].original_position,
+		line: (if .[0].position > 0 then .[0].position else .[0].original_position end),
+		resolved: (map(.resolver != null) | all), outdated: (.[0].position == 0),
+		comments: map({author: .user.login, body})}) | sort_by(.id)'
+}
+
+pr_threads() {
+	pr=
+	all=false
+	for arg in "$@"; do
+		case $arg in
+		--all) all=true ;;
+		-*) usage ;;
+		*)
+			[ -z "$pr" ] || usage
+			pr=$(number "$arg") || exit 2
+			;;
+		esac
+	done
+	[ -n "$pr" ] || usage
+	# shellcheck disable=SC2016
+	print='[.[] | select($all or (.resolved | not))] |
+		if length == 0 then "No \(if $all then "" else "unresolved " end)review threads."
+		else map("Thread \(.id) on \(.path):\(.line // "?")" +
+			(if .outdated then ", outdated" else "" end) + (if .resolved then ", resolved" else "" end) + "\n" +
+			([.comments[] | "  \(.author // "ghost"): \(.body | gsub("\r"; "") | gsub("\n"; "\n    "))"] | join("\n"))
+		) | join("\n\n") end'
+	if [ "$kind" = github ]; then
+		need_gh
+		# Review threads exist only in GraphQL; REST cannot tell whether one
+		# is resolved.
+		# shellcheck disable=SC2016
+		query='query($owner: String!, $repo: String!, $pr: Int!) {
+		  repository(owner: $owner, name: $repo) {
+		    pullRequest(number: $pr) {
+		      reviewThreads(first: 100) {
+		        totalCount
+		        nodes {
+		          id isResolved isOutdated path line originalLine
+		          comments(first: 50) { nodes { author { login } body } }
+		        }
+		      }
+		    }
+		  }
+		}'
+		gh api graphql -F owner='{owner}' -F repo='{repo}' -F pr="$pr" -f query="$query" --jq "$all as \$all |
+			.data.repository.pullRequest.reviewThreads
+			| ([.nodes[] | {id, path, line: (.line // .originalLine), resolved: .isResolved, outdated: .isOutdated,
+				comments: [.comments.nodes[] | {author: .author.login, body}]}] | $print),
+			(if .totalCount > 100 then \"Only the first 100 of \(.totalCount) threads are listed.\" else empty end)" ||
+			die "cannot read the review threads of #$pr"
+		return
+	fi
+	forgejo_target
+	threads=$(forgejo_threads "$pr") || exit 1
+	printf '%s' "$threads" | jq -r --argjson all "$all" "$print"
+}
+
+pr_reply() {
+	[ $# -eq 4 ] && [ "$3" = --body ] && [ -n "$4" ] || usage
+	pr=$(number "$1") || exit 2
+	if [ "$kind" = github ]; then
+		need_gh
+		# shellcheck disable=SC2016
+		gh api graphql -F thread="$2" -f body="$4" -f query='
+			mutation($thread: ID!, $body: String!) {
+			  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { id } }
+			}' >/dev/null || exit 1
+		return
+	fi
+	forgejo_target
+	thread=$(number "$2") || exit 2
+	# A reply is a review of its own with one comment on the thread's line.
+	payload=$(forgejo_threads "$pr" | jq -c --argjson id "$thread" --arg body "$4" '
+		.[] | select(.id == $id)
+		| {event: "COMMENT", body: "", comments: [{path, body: $body, new_position: .position, old_position: .original_position}]}') ||
+		exit 1
+	[ -n "$payload" ] || die "#$pr has no review thread $thread"
+	forgejo_request POST "repos/$target/pulls/$pr/reviews" "$payload" >/dev/null || exit 1
+}
+
+pr_resolve() {
+	[ $# -eq 2 ] || usage
+	pr=$(number "$1") || exit 2
+	[ "$kind" = github ] ||
+		die "Forgejo's API cannot resolve a review thread; it stays open until someone resolves it on the web"
+	need_gh
+	# shellcheck disable=SC2016
+	gh api graphql -F thread="$2" -f query='
+		mutation($thread: ID!) {
+		  resolveReviewThread(input: { threadId: $thread }) { thread { isResolved } }
+		}' >/dev/null || exit 1
+}
+
 runs() {
 	[ $# -eq 1 ] || usage
 	if [ "$kind" = github ]; then
@@ -878,6 +1045,234 @@ label_list() {
 	return 0
 }
 
+# A stack on Forgejo, which has no stacks of its own. The state is a file
+# in the git directory, so each worktree has its own: a "base NAME" line,
+# then one "branch NAME COMMIT" line per branch, bottom first, where COMMIT
+# is the tip the branch below had when this branch was last put onto it.
+# Rebasing replays only what follows that commit, so an amended lower branch
+# does not bring its old commits along.
+stack_file() {
+	printf '%s/starling-stack\n' "$(git rev-parse --absolute-git-dir)"
+}
+
+stack_read() {
+	file=$(stack_file)
+	[ -f "$file" ] || die "no stack in this work tree; create one with: forge stack init BRANCH..."
+	stack_base=$(sed -n 's/^base //p' "$file")
+	stack_branches=$(sed -n 's/^branch \([^ ]*\) .*/\1/p' "$file")
+}
+
+# stack_record BRANCH COMMIT: set the commit recorded for a branch.
+stack_record() {
+	file=$(stack_file)
+	state=$(awk -v b="$1" -v c="$2" '$1 == "branch" && $2 == b { $3 = c } { print }' "$file") &&
+		printf '%s\n' "$state" >"$file"
+}
+
+# stack_neighbor BRANCH OFFSET: the branch OFFSET places above BRANCH.
+stack_neighbor() {
+	printf '%s\n' "$stack_branches" | awk -v b="$1" -v o="$2" '
+		{ name[NR] = $0; if ($0 == b) at = NR }
+		END { if (at && (at + o) in name) print name[at + o] }'
+}
+
+stack_init() {
+	stack_base=
+	if [ "${1:-}" = --base ]; then
+		[ $# -ge 2 ] || usage
+		stack_base=$2
+		shift 2
+	fi
+	[ $# -ge 1 ] || usage
+	if [ -z "$stack_base" ]; then
+		stack_base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || stack_base=origin/main
+		stack_base=${stack_base#origin/}
+	fi
+	git rev-parse -q --verify "origin/$stack_base^{commit}" >/dev/null || die "there is no origin/$stack_base to base the stack on"
+	state="base $stack_base"
+	below=origin/$stack_base
+	for branch in "$@"; do
+		git rev-parse -q --verify "refs/heads/$branch" >/dev/null ||
+			git branch --no-track "$branch" "$below" || exit 1
+		state="$state
+branch $branch $(git merge-base "$branch" "$below")" || die "$branch and $below share no history"
+		below=$branch
+	done
+	printf '%s\n' "$state" >"$(stack_file)"
+	git switch -q "$1" || exit 1
+	echo "Stack on $stack_base, bottom first: $*. Now on $1."
+}
+
+stack_add() {
+	[ $# -eq 1 ] || usage
+	stack_read
+	top=$(printf '%s\n' "$stack_branches" | tail -n 1)
+	git switch -q -c "$1" --no-track "$top" || exit 1
+	printf 'branch %s %s\n' "$1" "$(git rev-parse "$top")" >>"$(stack_file)"
+}
+
+stack_view() {
+	stack_read
+	forgejo_target
+	current=$(git symbolic-ref -q --short HEAD) || current=
+	open=$(pr_list) || exit 1
+	printf '%s\n' "$stack_branches" | awk '{ line[NR] = $0 } END { for (i = NR; i >= 1; i--) print line[i] }' |
+		while IFS= read -r branch; do
+			mark=' '
+			[ "$branch" != "$current" ] || mark='*'
+			sha=$(git rev-parse -q --verify "refs/heads/$branch") || sha=
+			pr=$(printf '%s\n' "$open" | awk -v s="$sha" '$3 == s { print $1, $2, $4; exit }')
+			[ -n "$pr" ] || pr=$(pr_list --head "$branch" | awk 'NR == 1 { print $1, $2, $4 }')
+			echo "$mark $branch  ${pr:-no pull request}"
+		done
+	echo "  $stack_base"
+}
+
+stack_checkout() {
+	stack_read
+	current=$(git symbolic-ref -q --short HEAD) || current=
+	case $1 in
+	bottom) to=$(printf '%s\n' "$stack_branches" | head -n 1) ;;
+	top) to=$(printf '%s\n' "$stack_branches" | tail -n 1) ;;
+	up) to=$(stack_neighbor "$current" 1) ;;
+	down) to=$(stack_neighbor "$current" -1) ;;
+	*) to=$(stack_neighbor "$1" 0) ;;
+	esac
+	[ -n "$to" ] || die "the stack has no such branch; forge stack view lists them"
+	git switch -q "$to" || exit 1
+}
+
+stack_rebase() {
+	mode=${1:-}
+	[ $# -le 1 ] || usage
+	stack_read
+	case $mode in
+	'' | --upstack) ;;
+	--continue) GIT_EDITOR=true git rebase --continue || die "the rebase still has conflicts; resolve them, git add, then: forge stack rebase --continue" ;;
+	--abort)
+		git rebase --abort
+		return
+		;;
+	*) usage ;;
+	esac
+	origin=$(git symbolic-ref -q --short HEAD) || origin=
+	[ -n "$mode" ] || git fetch -q origin || exit 1
+	below=origin/$stack_base
+	skip=
+	[ "$mode" != --upstack ] || skip=$origin
+	for branch in $stack_branches; do
+		if [ -n "$skip" ]; then
+			[ "$branch" != "$skip" ] || skip=
+			below=$branch
+			continue
+		fi
+		if ! git merge-base --is-ancestor "$below" "$branch"; then
+			from=$(sed -n "s/^branch $(printf '%s' "$branch" | sed 's/[.[\*^$/]/\\&/g') //p" "$(stack_file)")
+			git merge-base --is-ancestor "$from" "$branch" 2>/dev/null || from=$below
+			git rebase -q --onto "$below" "$from" "$branch" ||
+				die "rebasing $branch onto $below stopped on a conflict; resolve it, git add, then: forge stack rebase --continue"
+		fi
+		stack_record "$branch" "$(git rev-parse "$below")"
+		below=$branch
+	done
+	[ -z "$origin" ] || git switch -q "$origin"
+}
+
+stack_push() {
+	stack_read
+	# shellcheck disable=SC2086
+	git push -q --force-with-lease -u origin $stack_branches || exit 1
+}
+
+# stack_bases: push, then give each branch's pull request the branch below
+# as its base, opening a draft where CREATE is set and there is none.
+stack_bases() {
+	create=$1
+	forgejo_target
+	[ -z "$head_owner" ] ||
+		die "a stack needs its branches in the repository the pull requests go to, and the origin remote is a fork"
+	stack_push
+	below=$stack_base
+	for branch in $stack_branches; do
+		pr=$(pr_list --head "$branch" | sed -n '1s/^#\([0-9]*\) .*/\1/p')
+		if [ -n "$pr" ]; then
+			base_now=$(forgejo_request GET "repos/$target/pulls/$pr" | jq -r .base.ref) || exit 1
+			[ "$base_now" = "$below" ] ||
+				forgejo_request PATCH "repos/$target/pulls/$pr" "{\"base\":\"$below\"}" >/dev/null || exit 1
+		elif [ -n "$create" ]; then
+			first=$(git rev-list --reverse "$below..$branch" | head -n 1)
+			[ -n "$first" ] || die "$branch has no commits of its own yet"
+			payload=$(jq -cn --arg title "WIP: $(git log -1 --format=%s "$first")" --arg body "$(git log -1 --format=%b "$first")" \
+				--arg head "$branch" --arg base "$below" '{title: $title, body: $body, head: $head, base: $base}')
+			forgejo_request POST "repos/$target/pulls" "$payload" | jq -r '"#\(.number) \(.html_url)"' || exit 1
+		fi
+		below=$branch
+	done
+}
+
+stack_sync() {
+	[ $# -eq 0 ] || usage
+	stack_read
+	forgejo_target
+	git fetch -q origin || exit 1
+	# A merged pull request's branch leaves the stack; the one above keeps
+	# its recorded commit, so it is replayed onto the base without it.
+	for branch in $stack_branches; do
+		[ -n "$(pr_list --state merged --head "$branch")" ] || break
+		file=$(stack_file)
+		state=$(awk -v b="$branch" '!($1 == "branch" && $2 == b)' "$file") && printf '%s\n' "$state" >"$file"
+		echo "$branch merged and left the stack."
+	done
+	stack_read
+	[ -n "$stack_branches" ] || {
+		rm -f "$(stack_file)"
+		echo "Every branch merged; the stack is gone."
+		return
+	}
+	stack_rebase
+	stack_bases ""
+	stack_view
+}
+
+stack() {
+	[ $# -ge 1 ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		gh stack --help >/dev/null 2>&1 || die "the gh stack extension is needed for stacks on GitHub and is not installed"
+		exec gh stack "$@"
+	fi
+	sub=$1
+	shift
+	case $sub in
+	init) stack_init "$@" ;;
+	add) stack_add "$@" ;;
+	view) stack_view ;;
+	checkout)
+		[ $# -eq 1 ] || usage
+		stack_checkout "$1"
+		;;
+	bottom | top | up | down)
+		[ $# -eq 0 ] || usage
+		stack_checkout "$sub"
+		;;
+	rebase) stack_rebase "$@" ;;
+	push)
+		[ $# -eq 0 ] || usage
+		stack_push
+		;;
+	submit)
+		[ "${1:-}" = --auto ] && [ $# -eq 1 ] || usage
+		stack_read
+		stack_bases create
+		;;
+	sync) stack_sync "$@" ;;
+	merge)
+		die "Forgejo merges a stack one pull request at a time: merge the bottom one there, run forge stack sync, and go on with the next"
+		;;
+	*) usage ;;
+	esac
+}
+
 [ $# -ge 1 ] || usage
 command=$1
 shift
@@ -901,6 +1296,10 @@ pr)
 	ready) pr_ready "$@" ;;
 	checks) pr_checks "$@" ;;
 	checkout) pr_checkout "$@" ;;
+	comments) pr_comments "$@" ;;
+	threads) pr_threads "$@" ;;
+	reply) pr_reply "$@" ;;
+	resolve) pr_resolve "$@" ;;
 	*) usage ;;
 	esac
 	;;
@@ -924,6 +1323,10 @@ issue)
 	sub) issue_sub "$@" ;;
 	*) usage ;;
 	esac
+	;;
+stack)
+	find_kind
+	stack "$@"
 	;;
 label)
 	[ "${1:-}" = list ] || usage

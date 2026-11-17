@@ -9,8 +9,9 @@ repository installs Starling as a committed `.starling/` folder, so the
 rules are written once and every clone, CI run and agent session has them,
 with nothing to set up on the machine.
 
-Starling is built for my own repositories and assumes how I work: GitHub,
-rebase merges, Conventional Commits and a lot of the work done by agents.
+Starling is built for my own repositories and assumes how I work: GitHub
+or Forgejo, rebase merges, Conventional Commits and a lot of the work done
+by agents.
 It is public and MIT-licensed, so read it or borrow from it, but I do not
 support other setups.
 
@@ -35,11 +36,14 @@ machine: no global git hooks path, nothing on `PATH`, nothing in
 ## Requirements
 
 - git, POSIX `sh` and POSIX `awk`, for every script and hook.
-- `gh`, signed in, for the skills that work with GitHub. Joining pull
-  requests into a stack also needs the `gh stack` extension.
-- On Forgejo, `curl` and `jq` in place of `gh`, and a token: in
-  `FORGEJO_TOKEN`, or as the password git's credential helper holds for the
-  host.
+- For the skills that work with issues and pull requests, in a repository
+  on GitHub: `gh`, signed in. Joining pull requests into a stack also
+  needs the `gh stack` extension.
+- In a repository on Forgejo: `curl` and `jq`, and a token, in
+  `FORGEJO_TOKEN` or as the password git's credential helper holds for the
+  host. Forgejo has no issue types, sub-issues or stacks of its own, and
+  its API cannot resolve a review thread: the skills say what they do
+  instead.
 - `jq`, only to merge Starling's settings into an existing
   `.claude/settings.json`. Without it, the installer says what to merge.
 

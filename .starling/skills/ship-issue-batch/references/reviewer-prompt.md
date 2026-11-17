@@ -17,9 +17,11 @@ Head commit `{HEAD_SHA}`, base branch `{BASE}`.
    check that `git rev-parse HEAD` matches.
 2. Prepare the worktree: {SETUP}. If it prints settings such as ports, use
    them for every command it names.
-3. Invoke the `/code-review` command with the arguments `high {PR} --fix`,
-   the effort level before the pull request number: the other way round
-   it reads the level as the target and silently reuses the last level.
+3. Invoke the `/code-review` command with the arguments
+   `high origin/{BASE}...{HEAD_SHA} --fix`: the pull request's changes as a
+   range, which needs no forge, with the effort level before it. The other
+   way round it reads the level as the target and silently reuses the
+   last level.
    Let it apply its fixes to `<WT>`, and report the level it actually ran
    at, or that its output shows none.
 4. Check the fixes: run the formatter on the files they touch, and any

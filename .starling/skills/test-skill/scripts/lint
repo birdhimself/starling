@@ -166,13 +166,13 @@ scan() {
 			sub(/^repos\//, "", owner)
 			sub(/\/.*/, "", owner)
 			if (owner != "owner" && owner != "OWNER")
-				report(line, "hard-codes the repository in " p "; write repos/{owner}/{repo}, which gh api fills in from the current repository")
+				report(line, "hard-codes the repository in " p "; write repos/{owner}/{repo}, which .starling/bin/forge api fills in from the current repository")
 			t = substr(t, RSTART + RLENGTH)
 		}
 		if (match(s, /(^|[ \t])(-R|--repo)[ =]+[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+/)) {
 			p = substr(s, RSTART, RLENGTH)
 			sub(/^[ \t]/, "", p)
-			report(line, "hard-codes the repository in " p "; drop it, gh uses the current repository")
+			report(line, "hard-codes the repository in " p "; drop it, the forge wrapper uses the current repository")
 		}
 		if (mode == "reference" && match(s, /\]\((\.\/)?[A-Za-z0-9._-]+\.md\)/))
 			report(line, "links to another file next to it; link every reference file from SKILL.md, one level deep")

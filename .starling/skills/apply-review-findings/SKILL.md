@@ -1,6 +1,6 @@
 ---
 name: apply-review-findings
-description: Applies review findings to a pull request's branch. It checks each finding against the code, sorts it into apply, drop or hold, applies the ones that hold, validates, folds each fix into the commit it corrects and pushes, and hands held findings back undecided. Ends at folded, pushed commits. Use when given review findings or a reviewer's patch to apply, such as the output of a code review, or when another skill hands over findings for a pull request. Do not use for answering review threads on GitHub (use `resolve-review-threads`), for reviewing a pull request yourself, for waiting for CI or marking a pull request ready (use `finish-pr`), or for implementing an issue (use `implement-issue`).
+description: Applies review findings to a pull request's branch. It checks each finding against the code, sorts it into apply, drop or hold, applies the ones that hold, validates, folds each fix into the commit it corrects and pushes, and hands held findings back undecided. Ends at folded, pushed commits. Use when given review findings or a reviewer's patch to apply, such as the output of a code review, or when another skill hands over findings for a pull request. Do not use for answering review threads on a pull request (use `resolve-review-threads`), for reviewing a pull request yourself, for waiting for CI or marking a pull request ready (use `finish-pr`), or for implementing an issue (use `implement-issue`).
 argument-hint: "<pr> [findings]"
 ---
 
@@ -35,7 +35,7 @@ conventions reviewers tend to miss.
 
 Work on the pull request's head branch in a clean checkout of it
 (`.starling/bin/forge pr checkout <number>`, or
-`gh stack checkout <branch>` in a stack).
+`.starling/bin/forge stack checkout <branch>` in a stack).
 Read the `AGENTS.md` files of the directories the findings touch.
 
 ## 2. Sort every finding
@@ -75,9 +75,9 @@ Commit with the `commit-changes` skill, naming for each fix the commit it
 corrects and telling it to fold them now, since the pull request's
 commits are pushed. When a fix changes what a commit does, have it reword
 that commit's message too, so that the message still describes the
-commit. Then push with `git push --force-with-lease`. In a
-`gh stack`, amend the lowest branch first, then `gh stack sync` and
-`gh stack submit`, so the branches above follow.
+commit. Then push with `git push --force-with-lease`. In a stack, amend
+the lowest branch first, then run `.starling/bin/forge stack sync`, so the
+branches above follow.
 
 ## 6. Report
 

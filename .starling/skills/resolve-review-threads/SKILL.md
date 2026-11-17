@@ -1,6 +1,6 @@
 ---
 name: resolve-review-threads
-description: Answers every unresolved review thread on a GitHub pull request. It judges each remark, has the changes worth making applied with apply-review-findings, replies in each thread with what changed or why not, and resolves the threads it answered. Ends at threads replied to and resolved. Use when asked to address review comments, apply review feedback, respond to reviewer remarks, handle bot review comments, or clear the unresolved threads on a pull request. Do not use for reviewing someone else's pull request, for findings that have no GitHub thread (use `apply-review-findings`), for marking a pull request ready (use `finish-pr`), or for creating or merging pull requests.
+description: Answers every unresolved review thread on a pull request. It judges each remark, has the changes worth making applied with apply-review-findings, replies in each thread with what changed or why not, and resolves the threads it answered. Ends at threads replied to and resolved. Use when asked to address review comments, apply review feedback, respond to reviewer remarks, handle bot review comments, or clear the unresolved threads on a pull request. Do not use for reviewing someone else's pull request, for findings that have no review thread (use `apply-review-findings`), for marking a pull request ready (use `finish-pr`), or for creating or merging pull requests.
 argument-hint: "[pr]"
 ---
 
@@ -29,14 +29,15 @@ decide a remark.
 ## 1. Read every thread
 
 ```sh
-.starling/skills/resolve-review-threads/scripts/threads <number>
-gh pr view <number> --comments
+.starling/bin/forge pr threads <number>
+.starling/bin/forge pr comments <number>
 ```
 
-`threads` prints each unresolved thread with its id, which resolving needs,
-the id of its first comment, which a reply needs, its file and line, and
-every comment. Top-level review bodies come from `gh pr view --comments`;
-a reviewer often makes the substantive point there. Then read the code
+`pr threads` prints each unresolved thread with its id, which replying and
+resolving need, its file and line, and every comment. `pr comments` prints
+the comments on the pull request itself and the summaries of its reviews;
+a reviewer often makes the substantive point there. `.starling/bin/forge`
+works on whichever forge the repository is on. Then read the code
 around each remark: a remark that is wrong about what the code does is
 common.
 
@@ -71,11 +72,10 @@ this change.
 
 ## 4. Reply in every thread
 
-Reply to the thread's first comment:
+Reply in the thread:
 
 ```sh
-gh api -X POST 'repos/{owner}/{repo}/pulls/<number>/comments/<comment-id>/replies' \
-  -f body='<reply>'
+.starling/bin/forge pr reply <number> <thread-id> --body '<reply>'
 ```
 
 In one or two sentences: for an accepted remark, what changed and where,
@@ -86,19 +86,17 @@ fix you did not make.
 
 ## 5. Resolve the threads
 
-Only GraphQL resolves a thread. After the reply has landed, one thread at a
-time:
+After the reply has landed, one thread at a time:
 
 ```sh
-gh api graphql -F threadId='<thread-id>' -f query='
-  mutation($threadId: ID!) {
-    resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
-  }'
+.starling/bin/forge pr resolve <number> <thread-id>
 ```
 
 Resolve a thread you accepted and fixed, and one you declined and answered.
 Leave it open when it asks the reviewer a question, or when the user has
-not decided something it raised.
+not decided something it raised. Not every forge lets a thread be resolved
+this way: where the command says so, the reply is the outcome, and the
+report names the threads left open for that reason.
 
 ## 6. Report
 
@@ -114,5 +112,5 @@ the reason.
   follow-up issue; do not fold it in.
 - A remark contradicts an `AGENTS.md` or the user → decline it in the
   thread.
-- GraphQL is unavailable → reply through REST, and report the threads you
-  could not resolve.
+- The forge cannot resolve a thread → reply all the same, and report the
+  threads you could not resolve.

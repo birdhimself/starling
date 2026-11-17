@@ -1,6 +1,6 @@
 ---
 name: ship-issue
-description: Takes a GitHub issue through the whole pipeline in Claude Code. It implements the issue with implement-issue, has each resulting pull request reviewed by a fresh agent that never saw the implementation, applies the findings with apply-review-findings, asks the user about held findings in one round, and brings each pull request to ready with finish-pr. Ends at ready pull requests, never merged. Use when asked to ship, fully deliver, or implement and review an issue end to end. Do not use for implementing without a review (use `implement-issue`), for shipping several issues at once (use `ship-issue-batch`), for answering review threads (use `resolve-review-threads`), for reviewing an existing pull request on its own, or for merging.
+description: Takes an issue through the whole pipeline in Claude Code. It implements the issue with implement-issue, has each resulting pull request reviewed by a fresh agent that never saw the implementation, applies the findings with apply-review-findings, asks the user about held findings in one round, and brings each pull request to ready with finish-pr. Ends at ready pull requests, never merged. Use when asked to ship, fully deliver, or implement and review an issue end to end. Do not use for implementing without a review (use `implement-issue`), for shipping several issues at once (use `ship-issue-batch`), for answering review threads (use `resolve-review-threads`), for reviewing an existing pull request on its own, or for merging.
 argument-hint: "<issue>"
 ---
 

@@ -8,5 +8,5 @@ description: Reviews widgets and reports findings without changing them. Use whe
 Run `scripts/missing` and read `references/absent.md`.
 Follow `.claude/skills/commit-changes/SKILL.md` for commits.
 Then use `no-such-skill`, as in step 2 of `commit-changes`.
-List issues with `gh api repos/acme/widgets/issues`.
+List issues with `.starling/bin/forge api repos/acme/widgets/issues`.
 List pull requests with `gh pr list -R acme/widgets`.
