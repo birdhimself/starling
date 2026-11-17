@@ -11,9 +11,11 @@
 #     AGENTS.md and creating AGENTS.md if there is none
 #   - links Starling's skills into .claude/skills/ and .agents/skills/ and
 #     removes links to skills Starling no longer has
-#   - copies .starling/workflows/*.yml into .github/workflows/, with the
-#     default branch in place of main, and removes Starling workflows that
-#     are gone
+#   - copies the workflows for the repository's forge, from
+#     .starling/workflows/github/ into .github/workflows/ or from
+#     .starling/workflows/forgejo/ into .forgejo/workflows/, with the default
+#     branch in place of main, and removes Starling workflows that are gone
+#     or were installed for the other forge
 #   - adds .starling/ to .prettierignore in a project that uses Prettier,
 #     and prints the rule that keeps Renovate off Starling's files
 #   - creates .claude/settings.json from .starling/claude-settings.json, or
@@ -119,17 +121,25 @@ for dir in .claude/skills .agents/skills; do
 	done
 done
 
-# Workflows, with the repository's default branch in place of main.
+# Workflows, for the forge the repository is on and with its default branch
+# in place of main. Without a remote the forge is unknown: GitHub's are
+# installed, and the next update corrects that.
 branch=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) && branch=${branch#origin/} || branch=main
-mkdir -p .github/workflows
-for wf in .github/workflows/starling-*.yml; do
-	[ -e "$wf" ] || continue
-	[ -e ".starling/workflows/$(basename "$wf")" ] || rm "$wf"
+if ! forge=$(.starling/bin/forge kind 2>/dev/null); then
+	forge=github
+	note "The forge is unknown without an origin remote, so the workflows are GitHub's. On Forgejo, run .starling/bin/update again once the remote exists."
+fi
+for dir in .github/workflows .forgejo/workflows; do
+	for wf in "$dir"/starling-*.yml; do
+		[ -e "$wf" ] || continue
+		[ "$dir" = ".$forge/workflows" ] && [ -e ".starling/workflows/$forge/$(basename "$wf")" ] || rm "$wf"
+	done
 done
-for wf in .starling/workflows/*.yml; do
+for wf in .starling/workflows/"$forge"/*.yml; do
 	[ -e "$wf" ] || continue
+	mkdir -p ".$forge/workflows"
 	awk -v branch="$branch" '$0 == "      - main" { print "      - " branch; next } { print }' "$wf" \
-		>".github/workflows/$(basename "$wf")"
+		>".$forge/workflows/$(basename "$wf")"
 done
 [ "$branch" = main ] || note "The workflows run on pushes to $branch, this repository's default branch."
 
@@ -159,8 +169,8 @@ for f in renovate.json renovate.json5 .github/renovate.json .github/renovate.jso
 done
 [ -n "$renovate" ] || [ ! -f package.json ] || ! grep -q '"renovate"[[:space:]]*:' package.json ||
 	renovate=package.json
-rule='{"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "enabled": false}'
-if [ -n "$renovate" ] && ! grep -qF '.github/workflows/starling-' "$renovate"; then
+rule="{\"matchFileNames\": [\".starling/**\", \".$forge/workflows/starling-*.yml\"], \"enabled\": false}"
+if [ -n "$renovate" ] && ! grep -qF ".$forge/workflows/starling-" "$renovate"; then
 	note "Renovate is set up in $renovate. Starling updates the actions it pins and replaces its files on every update, so add this rule to the packageRules there:
   $rule"
 fi
@@ -213,7 +223,7 @@ else
 	echo "Updated Starling from $old to $version."
 	header="build: update Starling to $version"
 fi
-changes=$(git status --short -- .starling AGENTS.md CLAUDE.md .claude .agents .github/workflows .prettierignore)
+changes=$(git status --short -- .starling AGENTS.md CLAUDE.md .claude .agents .github/workflows .forgejo/workflows .prettierignore)
 if [ -z "$changes" ]; then
 	echo "Nothing changed."
 else

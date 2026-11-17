@@ -252,11 +252,13 @@ for f in renovate.json renovate.json5 .github/renovate.json .github/renovate.jso
 done
 [ -n "$renovate" ] || [ ! -f package.json ] || ! grep -q '"renovate"[[:space:]]*:' package.json ||
 	renovate=package.json
+# The workflows are where the installer put them for this forge.
+forge=$(.starling/bin/forge kind 2>/dev/null) || forge=github
 if [ -z "$renovate" ]; then
 	echo "  not set up"
-elif grep -qF '.github/workflows/starling-' "$renovate"; then
+elif grep -qF ".$forge/workflows/starling-" "$renovate"; then
 	echo "  $renovate leaves Starling's files alone"
 else
 	echo "  $renovate needs this rule in its packageRules:"
-	echo '  {"matchFileNames": [".starling/**", ".github/workflows/starling-*.yml"], "enabled": false}'
+	echo "  {\"matchFileNames\": [\".starling/**\", \".$forge/workflows/starling-*.yml\"], \"enabled\": false}"
 fi

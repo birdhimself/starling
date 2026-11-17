@@ -99,8 +99,8 @@ if cmp -s "$root/.claude/settings.json" "$root/.starling/claude-settings.json"; 
 fi
 
 # Starling checks its own commits with the workflow the installer installs.
-if cmp -s "$root/.github/workflows/starling-commits.yml" "$root/.starling/workflows/starling-commits.yml"; then ok; else
-	bad "workflow: .github/workflows/starling-commits.yml" "differs from .starling/workflows/starling-commits.yml"
+if cmp -s "$root/.github/workflows/starling-commits.yml" "$root/.starling/workflows/github/starling-commits.yml"; then ok; else
+	bad "workflow: .github/workflows/starling-commits.yml" "differs from .starling/workflows/github/starling-commits.yml"
 fi
 
 # Starling uses its own skills, linked as the installer links them.
@@ -799,7 +799,9 @@ star=$tmp/star
 	mkdir "$star" && cp -R "$root/.starling" "$root/install" "$star"/ &&
 		git init -q -b main "$star" && commit_all "$star" "feat: one" && git -C "$star" tag v0.1.0 &&
 		rm -r "$star/.starling/skills/commit-changes" &&
-		cp "$star/.starling/workflows/starling-commits.yml" "$star/.starling/workflows/starling-extra.yml" &&
+		for forge in github forgejo; do
+			cp "$star/.starling/workflows/$forge/starling-commits.yml" "$star/.starling/workflows/$forge/starling-extra.yml" || exit 2
+		done &&
 		commit_all "$star" "feat: two" && git -C "$star" tag v0.2.0
 } || exit 2
 STARLING_REPO=file://$star
@@ -887,6 +889,29 @@ assert "install: AGENTS.md created" [ "$(cat "$plain/AGENTS.md")" = "# plain
 $import" ]
 assert "install: settings created" cmp -s "$plain/.claude/settings.json" "$plain/.starling/claude-settings.json"
 assert "install: no .prettierignore without Prettier" gone "$plain/.prettierignore"
+
+if printf '%s\n' "$out" | grep -qF "The forge is unknown without an origin remote"; then ok; else
+	bad "install: note on an unknown forge" "$out"
+fi
+
+# A target on Forgejo, with Renovate: the workflows go where Forgejo reads
+# them, and Starling's workflows installed for GitHub are removed.
+fjt=$tmp/forgejo-target
+fj_rule='{"matchFileNames": [".starling/**", ".forgejo/workflows/starling-*.yml"], "enabled": false}'
+{
+	git init -q "$fjt" && echo "readme" >"$fjt/README" && echo '{}' >"$fjt/renovate.json" &&
+		mkdir -p "$fjt/.github/workflows" && echo "name: Old" >"$fjt/.github/workflows/starling-commits.yml" &&
+		echo "name: Own" >"$fjt/.github/workflows/build.yml" &&
+		git -C "$fjt" remote add origin https://git.example.org/example/widgets.git && commit_all "$fjt" "docs: start"
+} || exit 2
+expect "$fjt" "install: on Forgejo" 0 "Installed Starling v0.2.0" "$root/install"
+assert "install: Forgejo's workflow" grep -q 'edited' "$fjt/.forgejo/workflows/starling-commits.yml"
+assert "install: every workflow for Forgejo" [ -f "$fjt/.forgejo/workflows/starling-extra.yml" ]
+assert "install: GitHub's workflow removed on Forgejo" gone "$fjt/.github/workflows/starling-commits.yml"
+assert "install: the project's workflow kept" [ -f "$fjt/.github/workflows/build.yml" ]
+if printf '%s\n' "$out" | grep -qF "  $fj_rule"; then ok; else bad "install: the Renovate rule on Forgejo" "$out"; fi
+if printf '%s\n' "$out" | grep -qF "The forge is unknown"; then bad "install: no forge note with a remote" "$out"; else ok; fi
+expect "$fjt" "survey: the Renovate rule on Forgejo" 0 "  $fj_rule" "$root/.starling/skills/adopt-starling/scripts/survey"
 
 # A target that uses Prettier and Renovate, with an ignore file that does not
 # end in a newline and settings on one line, which jq rewrites.

@@ -63,7 +63,7 @@ Besides `.starling/`, the installer sets up:
 | ------------------------------------------------ | ------------------------------------------------------------------------------- |
 | `AGENTS.md`                                      | One import line after the first heading. A lone `CLAUDE.md` is renamed to this. |
 | `.claude/skills/<name>`, `.agents/skills/<name>` | A link to each of Starling's skills, for Claude Code and Codex.                 |
-| `.github/workflows/starling-commits.yml`         | The CI check of every commit.                                                   |
+| `.github/workflows/starling-commits.yml`         | The CI check of every commit. On Forgejo, in `.forgejo/workflows/`.             |
 | `.claude/settings.json`                          | The Claude Code hooks, and Claude Code's own commit and pull request lines off. |
 | `.prettierignore`                                | `.starling/`, in a project that uses Prettier.                                  |
 | `core.hooksPath` in the clone's git config       | Points to `.starling/hooks`, unless another tool already set it.                |
