@@ -19,7 +19,7 @@ Paths are relative to the repository root.
 - **Entry point:** when the branch already has an open pull request whose
   title or description is out of date, gather the facts, then start at
   "Write the title and body".
-- **Never:** merge; run `gh pr ready`; open a pull request from the default
+- **Never:** merge; mark a pull request ready; open a pull request from the default
   branch; change the work to get a check to pass; claim a check that did
   not run; push a rewritten branch without `--force-with-lease`.
 
@@ -46,8 +46,8 @@ one other than the default. The script only reads, and prints:
 - `Refs:` the issues those commits name.
 - `Changes:` uncommitted files.
 - `Template:` the repository's pull request template, if it has one.
-- `Pull request:` the open one for this branch, or `unknown` when `gh`
-  could not say.
+- `Pull request:` the open one for this branch, or `unknown` when the
+  forge could not be asked.
 
 Check the stop conditions below against these facts.
 
@@ -86,7 +86,8 @@ A check that fails means the work is not finished: stop and report it.
 
 Read the whole change, not only the last commit:
 `git log origin/<base>..HEAD` and `git diff origin/<base>...HEAD`. Read
-any issue it belongs to with `gh issue view <number> --comments`.
+any issue it belongs to with `.starling/bin/forge issue view <number>`,
+which prints the issue and every comment.
 
 **Title.** A plain sentence that says what changes for users or
 maintainers.
@@ -112,7 +113,7 @@ Write the body to a file outside the repository:
 
 ```sh
 git push -u origin HEAD
-gh pr create --draft --base <base> --title "<title>" --body-file "$body"
+.starling/bin/forge pr create --draft --base <base> --title "<title>" --body-file "$body"
 ```
 
 Use `git push --force-with-lease` instead when you rewrote commits that
@@ -120,10 +121,12 @@ were already pushed. Leave out `--draft` only when the caller or the policy
 says so.
 
 For a pull request that is already open, do not push. Save the new text
-with `gh pr edit <number> --title "<title>" --body-file "$body"`.
+with
+`.starling/bin/forge pr edit <number> --title "<title>" --body-file "$body"`.
 
-When `gh` fails, report its error together with the title and the path of
-the body file, so that nothing has to be written again.
+`.starling/bin/forge` works on whichever forge the repository is on. When
+it fails, report its error together with the title and the path of the
+body file, so that nothing has to be written again.
 
 ## 7. Report
 

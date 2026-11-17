@@ -32,17 +32,17 @@ graders:
 - name: creates-a-draft
   type: tool_used
   tool: Bash
-  input_match: 'gh pr create[^|;&]*--draft'
+  input_match: 'forge pr create[^|;&]*--draft'
 - name: never-marks-ready
   type: tool_used
   tool: Bash
-  input_match: 'gh pr ready'
+  input_match: '(forge|gh) pr ready'
   min: 0
   max: 0
 - name: never-merges
   type: tool_used
   tool: Bash
-  input_match: 'gh pr merge|git merge(?!-)'
+  input_match: 'gh pr merge|pulls/\d+/merge|git merge(?!-)'
   min: 0
   max: 0
 - name: title-is-a-plain-sentence

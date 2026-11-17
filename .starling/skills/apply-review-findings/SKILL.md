@@ -34,7 +34,8 @@ conventions reviewers tend to miss.
 ## 1. Check out the branch
 
 Work on the pull request's head branch in a clean checkout of it
-(`gh pr checkout <number>`, or `gh stack checkout <branch>` in a stack).
+(`.starling/bin/forge pr checkout <number>`, or
+`gh stack checkout <branch>` in a stack).
 Read the `AGENTS.md` files of the directories the findings touch.
 
 ## 2. Sort every finding
@@ -94,5 +95,5 @@ Do not mark the pull request ready: the `finish-pr` skill does that.
 - A fix grows guards instead of shrinking the problem → stop and report.
 - Validation fails for a reason the findings do not explain → report it
   with its output.
-- The branch moved on GitHub since you checked it out → fetch, and check
+- The branch moved on the forge since you checked it out → fetch, and check
   the findings against the new head first.
