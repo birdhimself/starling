@@ -4,13 +4,21 @@
 #   forge kind
 #   forge pr view [PR] [--body]
 #   forge pr list [--head BRANCH] [--state open|merged|closed] [--search TEXT]
-#   forge pr create [--draft] [--base BRANCH] [--head BRANCH] --title TITLE --body-file FILE
-#   forge pr edit PR [--title TITLE] [--body-file FILE] [--base BRANCH]
+#   forge pr create [--draft] [--base BRANCH] [--head BRANCH] --title TITLE --body-file FILE [--label LABEL]...
+#   forge pr edit PR [--title TITLE] [--body-file FILE] [--base BRANCH] [--add-label LABEL]... [--remove-label LABEL]...
 #   forge pr ready PR
 #   forge pr checks PR [--log-failed]
 #   forge pr checkout PR
 #   forge runs COMMIT
 #   forge issue view ISSUE
+#   forge issue list [--label LABEL] [--state open|closed]
+#   forge issue create --title TITLE --body-file FILE [--type TYPE] [--label LABEL]...
+#   forge issue edit ISSUE [--title TITLE] [--body-file FILE] [--type TYPE] [--add-label LABEL]... [--remove-label LABEL]...
+#   forge issue close ISSUE [--duplicate-of ISSUE | --not-planned]
+#   forge issue relations ISSUE
+#   forge issue block ISSUE --by ISSUE [--remove]
+#   forge issue sub ISSUE --of ISSUE [--remove]
+#   forge label list
 #   forge api [-X METHOD] [--input FILE] PATH
 #
 # Skills and scripts call this instead of a forge's own tool, so that they
@@ -32,7 +40,8 @@
 #              keeps those whose title or description contains TEXT.
 # pr create    opens a pull request from the current branch, or --head, onto
 #              the default branch, or --base, and prints its URL.
-# pr edit      changes the title, the description or the base branch.
+# pr edit      changes the title, the description, the base branch or the
+#              labels.
 # pr ready     marks a draft as ready for review.
 # pr checks    prints one "NAME<TAB>STATE<TAB>URL" line per check on the head
 #              commit: STATE is pass, fail, pending or skipped. Exits 1
@@ -41,12 +50,33 @@
 # pr checkout  switches to the pull request's head branch, fetching it.
 # runs         prints one "ID STATE" line per CI run on COMMIT: STATE is
 #              completed or pending.
-# issue view   prints an issue with every comment.
+# issue view   prints an issue's title, state, author, type, labels and
+#              number, then its description and every comment.
+# issue list   prints one "#NUMBER STATE TITLE" line per issue, open ones by
+#              default.
+# issue create opens an issue and prints its URL.
+# issue edit   changes the title, the description, the type or the labels.
+# issue close  closes an issue: as a duplicate of another, as not planned,
+#              or as done.
+# issue relations
+#              prints the issues that block this one, the ones it blocks,
+#              its parent and its sub-issues, each as "#NUMBER STATE TITLE"
+#              under "Blocked by:", "Blocking:", "Parent:" and "Sub-issues:",
+#              or "none".
+# issue block  records that the first issue is blocked by the second, or
+#              with --remove that it no longer is.
+# issue sub    makes the first issue a sub-issue of the second, or with
+#              --remove no longer one.
+# label list   prints the repository's labels, one per line.
 # api          calls the forge's own API and prints the response. PATH is
 #              the forge's, without its /api/v1 prefix on Forgejo; {owner}
 #              and {repo} stand for this repository. --input sends a file as
 #              the JSON body, - for standard input. The default method is
 #              GET, or POST with a body. For what no other subcommand covers.
+#
+# Forgejo has no issue types and no sub-issues: --type and issue sub fail
+# there, saying so, and issue view and issue relations print "not on this
+# forge" in their place.
 #
 # A draft on Forgejo is a title that starts with "WIP:". The subcommands add
 # and remove the prefix, and titles are given and printed without it. When
@@ -329,23 +359,30 @@ pr_list() {
 }
 
 # pr_fields "$@": read --title, --body-file, --base, --head and --draft into
-# variables of those names; anything else goes to rest.
+# variables of those names, and labels into add and remove, one per line;
+# anything else goes to rest.
 pr_fields() {
 	title=
 	body_file=
 	base_branch=
 	head=
 	draft=
+	add=
+	remove=
 	rest=
 	while [ $# -gt 0 ]; do
 		case $1 in
-		--title | --body-file | --base | --head)
-			[ $# -ge 2 ] || usage
+		--title | --body-file | --base | --head | --label | --add-label | --remove-label)
+			[ $# -ge 2 ] && [ -n "$2" ] || usage
 			case $1 in
 			--title) title=$2 ;;
 			--body-file) body_file=$2 ;;
 			--base) base_branch=$2 ;;
 			--head) head=$2 ;;
+			--label | --add-label) add="$add$2
+" ;;
+			--remove-label) remove="$remove$2
+" ;;
 			esac
 			shift
 			;;
@@ -363,11 +400,12 @@ pr_fields() {
 
 pr_create() {
 	pr_fields "$@"
-	[ -z "$rest" ] && [ -n "$title" ] && [ -n "$body_file" ] || usage
+	[ -z "$rest" ] && [ -z "$remove" ] && [ -n "$title" ] && [ -n "$body_file" ] || usage
 	if [ "$kind" = github ]; then
 		need_gh
+		labels=$(commas "$add")
 		gh pr create ${draft:+--draft} ${base_branch:+--base "$base_branch"} ${head:+--head "$head"} \
-			--title "$title" --body-file "$body_file" || exit 1
+			--title "$title" --body-file "$body_file" ${labels:+--label "$labels"} || exit 1
 		return
 	fi
 	forgejo_target
@@ -376,18 +414,24 @@ pr_create() {
 	payload=$(jq -cn --arg title "$title" --rawfile body "$body_file" \
 		--arg head "${head_owner:+$head_owner:}$head" --arg base "${base_branch:-$default_branch}" \
 		'{title: $title, body: $body, head: $head, base: $base}') || exit 1
-	forgejo_request POST "repos/$target/pulls" "$payload" | jq -r .html_url || exit 1
+	created=$(forgejo_request POST "repos/$target/pulls" "$payload") || exit 1
+	# A pull request takes labels as an issue does.
+	forgejo_labels "$(printf '%s' "$created" | jq -r .number)"
+	printf '%s' "$created" | jq -r .html_url
 }
 
 pr_edit() {
 	pr_fields "$@"
 	[ -n "$rest" ] && [ -z "$draft" ] && [ -z "$head" ] || usage
 	pr=$(number "$rest") || exit 2
-	[ -n "$title$body_file$base_branch" ] || usage
+	[ -n "$title$body_file$base_branch$add$remove" ] || usage
 	if [ "$kind" = github ]; then
 		need_gh
+		labels=$(commas "$add")
+		unlabels=$(commas "$remove")
 		gh pr edit "$pr" ${title:+--title "$title"} ${body_file:+--body-file "$body_file"} \
-			${base_branch:+--base "$base_branch"} >/dev/null || exit 1
+			${base_branch:+--base "$base_branch"} ${labels:+--add-label "$labels"} \
+			${unlabels:+--remove-label "$unlabels"} >/dev/null || exit 1
 		return
 	fi
 	forgejo_target
@@ -402,7 +446,8 @@ pr_edit() {
 		'(if $title != "" then {title: $title} else {} end)
 		+ (if $base != "" then {base: $base} else {} end)
 		+ (if $has_body != "" then {body: $body} else {} end)') || exit 1
-	forgejo_request PATCH "repos/$target/pulls/$pr" "$payload" >/dev/null || exit 1
+	[ "$payload" = '{}' ] || forgejo_request PATCH "repos/$target/pulls/$pr" "$payload" >/dev/null || exit 1
+	forgejo_labels "$pr"
 }
 
 pr_ready() {
@@ -544,27 +589,293 @@ runs() {
 		jq -r '.statuses // [] | .[] | "\(.id) \(if .status == "pending" then "pending" else "completed" end)"' || exit 1
 }
 
+# The line both forges print for one issue in a list.
+issue_line='"#\(.number) \(.state) \(.title)"'
+
 issue_view() {
 	[ $# -eq 1 ] || usage
 	issue=$(number "$1") || exit 2
+	# shellcheck disable=SC2016
+	head_filter='"title:\t\(.title)", "state:\t\(.state)", "author:\t\(.user.login)",
+		"type:\t\($type)", "labels:\t\([.labels[].name] | join(", "))", "number:\t\(.number)", "--", (.body // "")'
+	comment_filter='.[] | "--", "author:\t\(.user.login)", "created:\t\(.created_at)", "--", (.body // "")'
 	if [ "$kind" = github ]; then
 		need_gh
 		# Without a terminal, gh issue view --comments leaves out the issue
-		# itself, so both come from its JSON.
-		# shellcheck disable=SC2016
-		gh issue view "$issue" --json number,title,state,author,labels,body,comments --jq '
-			"title:\t\(.title)", "state:\t\(.state | ascii_downcase)", "author:\t\(.author.login)",
-			"labels:\t\([.labels[].name] | join(", "))", "number:\t\(.number)", "--", .body,
-			(.comments[] | "--", "author:\t\(.author.login)", "created:\t\(.createdAt)", "--", .body)' || exit 1
+		# itself, and it knows no types, so both parts come from the API.
+		gh api "repos/{owner}/{repo}/issues/$issue" --jq "(.type.name // \"none\") as \$type | $head_filter" || exit 1
+		gh api --paginate "repos/{owner}/{repo}/issues/$issue/comments?per_page=100" --jq "$comment_filter" || exit 1
 		return
 	fi
 	forgejo_target
 	data=$(forgejo_request GET "repos/$target/issues/$issue") || exit 1
 	comments=$(forgejo_pages "repos/$target/issues/$issue/comments?sort=oldest") || exit 1
-	printf '%s' "$data" | jq -r --argjson comments "$comments" '
-		"title:\t\(.title)", "state:\t\(.state)", "author:\t\(.user.login)",
-		"labels:\t\([.labels[].name] | join(", "))", "number:\t\(.number)", "--", .body,
-		($comments[] | "--", "author:\t\(.user.login)", "created:\t\(.created_at)", "--", .body)'
+	printf '%s' "$data" | jq -r "\"not on this forge\" as \$type | $head_filter"
+	printf '%s' "$comments" | jq -r "$comment_filter"
+}
+
+issue_list() {
+	label=
+	state=open
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--label | --state)
+			[ $# -ge 2 ] || usage
+			case $1 in
+			--label) label=$2 ;;
+			--state) state=$2 ;;
+			esac
+			shift
+			;;
+		*) usage ;;
+		esac
+		shift
+	done
+	case $state in
+	open | closed) ;;
+	*) usage ;;
+	esac
+	if [ "$kind" = github ]; then
+		need_gh
+		gh issue list --state "$state" --limit 100 ${label:+--label "$label"} --json number,state,title \
+			--jq '.[] | "#\(.number) \(.state | ascii_downcase) \(.title)"' || exit 1
+		return
+	fi
+	forgejo_target
+	forgejo_pages "repos/$target/issues?type=issues&state=$state&labels=$(printf '%s' "$label" | jq -sRr @uri)" |
+		jq -r ".[] | $issue_line" || exit 1
+}
+
+# issue_fields "$@": read the options of issue create and issue edit into
+# title, body_file, type, add and remove (labels, one per line); anything
+# else goes to rest.
+issue_fields() {
+	title=
+	body_file=
+	type=
+	add=
+	remove=
+	rest=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--title | --body-file | --type | --label | --add-label | --remove-label)
+			[ $# -ge 2 ] && [ -n "$2" ] || usage
+			case $1 in
+			--title) title=$2 ;;
+			--body-file) body_file=$2 ;;
+			--type) type=$2 ;;
+			--label | --add-label) add="$add$2
+" ;;
+			--remove-label) remove="$remove$2
+" ;;
+			esac
+			shift
+			;;
+		-*) usage ;;
+		*)
+			[ -z "$rest" ] || usage
+			rest=$1
+			;;
+		esac
+		shift
+	done
+	[ -z "$body_file" ] || [ -r "$body_file" ] || die "cannot read $body_file"
+	[ -z "$type" ] || [ "$kind" = github ] ||
+		die "Forgejo has no issue types; leave out --type, and use what the repository's policy names in its place"
+}
+
+# commas LINES: labels, one per line, as gh takes them.
+commas() {
+	printf '%s' "$1" | awk 'NF { printf "%s%s", sep, $0; sep = "," }'
+}
+
+# forgejo_labels ISSUE: add and remove the labels in add and remove.
+forgejo_labels() {
+	if [ -n "$add" ]; then
+		payload=$(printf '%s' "$add" | jq -cRn '{labels: [inputs | select(. != "")]}')
+		forgejo_request POST "repos/$target/issues/$1/labels" "$payload" >/dev/null || exit 1
+	fi
+	printf '%s' "$remove" | while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		forgejo_request DELETE "repos/$target/issues/$1/labels/$(printf '%s' "$name" | jq -sRr @uri)" >/dev/null || exit 1
+	done || exit 1
+}
+
+issue_create() {
+	issue_fields "$@"
+	[ -z "$rest" ] && [ -z "$remove" ] && [ -n "$title" ] && [ -n "$body_file" ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		labels=$(commas "$add")
+		gh issue create --title "$title" --body-file "$body_file" ${type:+--type "$type"} ${labels:+--label "$labels"} || exit 1
+		return
+	fi
+	forgejo_target
+	payload=$(jq -cn --arg title "$title" --rawfile body "$body_file" '{title: $title, body: $body}') || exit 1
+	created=$(forgejo_request POST "repos/$target/issues" "$payload") || exit 1
+	# Creating takes label ids, adding takes names.
+	forgejo_labels "$(printf '%s' "$created" | jq -r .number)"
+	printf '%s' "$created" | jq -r .html_url
+}
+
+issue_edit() {
+	issue_fields "$@"
+	[ -n "$rest" ] || usage
+	issue=$(number "$rest") || exit 2
+	[ -n "$title$body_file$type$add$remove" ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		labels=$(commas "$add")
+		unlabels=$(commas "$remove")
+		gh issue edit "$issue" ${title:+--title "$title"} ${body_file:+--body-file "$body_file"} ${type:+--type "$type"} \
+			${labels:+--add-label "$labels"} ${unlabels:+--remove-label "$unlabels"} >/dev/null || exit 1
+		return
+	fi
+	forgejo_target
+	if [ -n "$title$body_file" ]; then
+		payload=$(jq -cn --arg title "$title" --rawfile body "${body_file:-/dev/null}" --arg has_body "$body_file" \
+			'(if $title != "" then {title: $title} else {} end) + (if $has_body != "" then {body: $body} else {} end)') || exit 1
+		forgejo_request PATCH "repos/$target/issues/$issue" "$payload" >/dev/null || exit 1
+	fi
+	forgejo_labels "$issue"
+}
+
+issue_close() {
+	[ $# -ge 1 ] || usage
+	issue=$(number "$1") || exit 2
+	shift
+	duplicate=
+	reason=
+	case ${1:-} in
+	'') ;;
+	--duplicate-of)
+		[ $# -eq 2 ] || usage
+		duplicate=$(number "$2") || exit 2
+		;;
+	--not-planned)
+		[ $# -eq 1 ] || usage
+		reason="not planned"
+		;;
+	*) usage ;;
+	esac
+	if [ "$kind" = github ]; then
+		need_gh
+		gh issue close "$issue" ${duplicate:+--duplicate-of "$duplicate"} ${reason:+--reason "$reason"} >/dev/null || exit 1
+		return
+	fi
+	# Forgejo closes without a reason, so a duplicate is named in a comment.
+	forgejo_target
+	if [ -n "$duplicate" ]; then
+		forgejo_request POST "repos/$target/issues/$issue/comments" "{\"body\":\"Duplicate of #$duplicate.\"}" >/dev/null || exit 1
+	fi
+	forgejo_request PATCH "repos/$target/issues/$issue" '{"state":"closed"}' >/dev/null || exit 1
+}
+
+# related LABEL LINES: one list of related issues, under its label.
+related() {
+	echo "$1:"
+	if [ -n "$2" ]; then
+		printf '%s\n' "$2" | sed 's/^/  /'
+	else
+		echo "  none"
+	fi
+}
+
+issue_relations() {
+	[ $# -eq 1 ] || usage
+	issue=$(number "$1") || exit 2
+	if [ "$kind" = github ]; then
+		need_gh
+		for list in "Blocked by:dependencies/blocked_by" "Blocking:dependencies/blocking"; do
+			lines=$(gh api "repos/{owner}/{repo}/issues/$issue/${list#*:}?per_page=100" --jq ".[] | $issue_line") ||
+				die "cannot read \"${list%%:*}\" for #$issue"
+			related "${list%%:*}" "$lines"
+		done
+		# GitHub answers 404 for an issue without a parent.
+		if parent=$(gh api "repos/{owner}/{repo}/issues/$issue/parent" --jq "$issue_line" 2>&1); then
+			related Parent "$parent"
+		else
+			case $parent in
+			*404* | *"Not Found"*) related Parent "" ;;
+			*) die "cannot read the parent of #$issue: $parent" ;;
+			esac
+		fi
+		lines=$(gh api "repos/{owner}/{repo}/issues/$issue/sub_issues?per_page=100" --jq ".[] | $issue_line") ||
+			die "cannot read \"Sub-issues\" for #$issue"
+		related Sub-issues "$lines"
+		return
+	fi
+	forgejo_target
+	for list in "Blocked by:dependencies" "Blocking:blocks"; do
+		lines=$(forgejo_pages "repos/$target/issues/$issue/${list#*:}?") || exit 1
+		related "${list%%:*}" "$(printf '%s' "$lines" | jq -r ".[] | $issue_line")"
+	done
+	related Parent "not on this forge"
+	related Sub-issues "not on this forge"
+}
+
+# issue_pair "$@": read "ISSUE OPTION ISSUE [--remove]" into issue, other
+# and undo, where OPTION is the first argument.
+issue_pair() {
+	option=$1
+	shift
+	[ $# -ge 3 ] && [ "$2" = "$option" ] || usage
+	issue=$(number "$1") || exit 2
+	other=$(number "$3") || exit 2
+	undo=
+	case ${4:-} in
+	'') ;;
+	--remove) undo=1 ;;
+	*) usage ;;
+	esac
+	[ $# -le 4 ] || usage
+}
+
+issue_block() {
+	issue_pair --by "$@"
+	if [ "$kind" = github ]; then
+		need_gh
+		# GitHub links issues by their id, not their number.
+		id=$(gh api "repos/{owner}/{repo}/issues/$other" --jq .id) || exit 1
+		if [ -n "$undo" ]; then
+			gh api -X DELETE "repos/{owner}/{repo}/issues/$issue/dependencies/blocked_by/$id" >/dev/null || exit 1
+		else
+			gh api -X POST "repos/{owner}/{repo}/issues/$issue/dependencies/blocked_by" -F issue_id="$id" >/dev/null || exit 1
+		fi
+		return
+	fi
+	forgejo_target
+	payload="{\"owner\":\"${target%/*}\",\"repo\":\"${target#*/}\",\"index\":$other}"
+	method=POST
+	[ -z "$undo" ] || method=DELETE
+	forgejo_request "$method" "repos/$target/issues/$issue/dependencies" "$payload" >/dev/null || exit 1
+}
+
+issue_sub() {
+	issue_pair --of "$@"
+	[ "$kind" = github ] ||
+		die "Forgejo has no sub-issues; record the hierarchy the way the repository's policy says, else in the parent's description"
+	need_gh
+	id=$(gh api "repos/{owner}/{repo}/issues/$issue" --jq .id) || exit 1
+	if [ -n "$undo" ]; then
+		gh api -X DELETE "repos/{owner}/{repo}/issues/$other/sub_issue" -F sub_issue_id="$id" >/dev/null || exit 1
+	else
+		gh api -X POST "repos/{owner}/{repo}/issues/$other/sub_issues" -F sub_issue_id="$id" >/dev/null || exit 1
+	fi
+}
+
+label_list() {
+	[ $# -eq 0 ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		gh label list --limit 200 --json name --jq '.[].name' || exit 1
+		return
+	fi
+	forgejo_target
+	forgejo_pages "repos/$target/labels?" | jq -r '.[].name' || exit 1
+	# An organization's labels apply to its repositories too.
+	forgejo_request GET "orgs/${target%/*}/labels?limit=50" 2>/dev/null | jq -r '.[].name'
+	return 0
 }
 
 [ $# -ge 1 ] || usage
@@ -604,8 +915,21 @@ issue)
 	find_kind
 	case $sub in
 	view) issue_view "$@" ;;
+	list) issue_list "$@" ;;
+	create) issue_create "$@" ;;
+	edit) issue_edit "$@" ;;
+	close) issue_close "$@" ;;
+	relations) issue_relations "$@" ;;
+	block) issue_block "$@" ;;
+	sub) issue_sub "$@" ;;
 	*) usage ;;
 	esac
+	;;
+label)
+	[ "${1:-}" = list ] || usage
+	shift
+	find_kind
+	label_list "$@"
 	;;
 api)
 	method=

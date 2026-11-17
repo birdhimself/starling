@@ -257,7 +257,7 @@ cat >"$FAKE_CURL.stdin"
 if [ -d "$FAKE_CURL.d" ]; then
 	name=${last#*/repos/example/widgets/}
 	name=$(printf '%s' "${name%%\?*}" | tr / _)
-	printf '%s %s\n' "$3" "$name" >>"$FAKE_CURL.calls"
+	printf '%s %s\n' "$5" "$name" >>"$FAKE_CURL.calls"
 	if [ -f "$FAKE_CURL.d/$name" ]; then cat "$FAKE_CURL.d/$name"; else printf '{"message": "no answer for %s"}\n404' "$name"; fi
 	exit
 fi
@@ -395,6 +395,13 @@ Closes #3' ]; then ok; else bad "forge: pr view --body" "$out"; fi
 	sent "pr edit keeps a draft a draft" '{"title":"WIP: Add more widgets"}'
 	forgejo pr edit 8 --title "Fix it" --body-file "$tmp/pr-body" --base develop
 	sent "pr edit of a ready pull request" '{"title":"Fix it","base":"develop","body":"Adds widgets.\n"}'
+	printf '[]\n200' >"$ans/issues_8_labels"
+	: >"$tmp/curl-answer.calls"
+	forgejo pr edit 8 --add-label bug
+	if [ $? -eq 0 ] && [ "$(cat "$tmp/curl-answer.calls")" = 'POST issues_8_labels' ]; then ok; else
+		bad "forge: pr edit with only a label" "$out
+$(cat "$tmp/curl-answer.calls")"
+	fi
 	forgejo pr ready 7
 	sent "pr ready removes the prefix" '{"title":"Add widgets"}'
 	: >"$tmp/curl-answer.calls"
@@ -429,6 +436,7 @@ lint	skipped	https://git.example.org/example/widgets/actions/runs/32/jobs/0' ]; 
 	want='title:	Lobby crashes
 state:	open
 author:	ada
+type:	not on this forge
 labels:	bug, lobby
 number:	3
 --
@@ -439,6 +447,60 @@ created:	2026-01-02T03:04:05Z
 --
 Confirmed.'
 	if [ "$out" = "$want" ]; then ok; else bad "forge: issue view on Forgejo" "$out"; fi
+	printf '[{"number": 3, "state": "open", "title": "Lobby crashes"}, {"number": 4, "state": "open", "title": "Kick a player"}]\n200' >"$ans/issues"
+	forgejo issue list --label "needs triage"
+	if [ "$out" = '#3 open Lobby crashes
+#4 open Kick a player' ]; then ok; else bad "forge: issue list on Forgejo" "$out"; fi
+	curl_got "issue list asks for issues with the label" \
+		"https://git.example.org/api/v1/repos/example/widgets/issues?type=issues&state=open&labels=needs%20triage&limit=50&page=1"
+	printf '[{"number": 2, "state": "closed", "title": "Lobbies"}]\n200' >"$ans/issues_3_dependencies"
+	printf '[]\n200' >"$ans/issues_3_blocks"
+	forgejo issue relations 3
+	want='Blocked by:
+  #2 closed Lobbies
+Blocking:
+  none
+Parent:
+  not on this forge
+Sub-issues:
+  not on this forge'
+	if [ "$out" = "$want" ]; then ok; else bad "forge: issue relations on Forgejo" "$out"; fi
+	printf '{}\n201' >"$ans/issues_3_dependencies"
+	forgejo issue block 3 --by 2
+	sent "issue block on Forgejo" '{"owner":"example","repo":"widgets","index":2}'
+	curl_got "issue block posts" "POST"
+	forgejo issue block 3 --by 2 --remove
+	curl_got "issue block --remove deletes" "DELETE"
+	forgejo issue sub 4 --of 3
+	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "Forgejo has no sub-issues"; then ok; else bad "forge: issue sub on Forgejo" "$out"; fi
+	forgejo issue edit 3 --type Bug
+	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "Forgejo has no issue types"; then ok; else bad "forge: --type on Forgejo" "$out"; fi
+	printf '{}\n200' >"$ans/issues_3"
+	printf '[]\n200' >"$ans/issues_3_labels"
+	printf '\n204' >"$ans/issues_3_labels_needs%20triage"
+	: >"$tmp/curl-answer.calls"
+	forgejo issue edit 3 --title "Fix the lobby crash" --add-label bug --add-label lobby --remove-label "needs triage"
+	if [ $? -eq 0 ] && [ "$(cat "$tmp/curl-answer.calls")" = 'PATCH issues_3
+POST issues_3_labels
+DELETE issues_3_labels_needs%20triage' ]; then ok; else
+		bad "forge: issue edit on Forgejo" "$out
+$(cat "$tmp/curl-answer.calls")"
+	fi
+	printf '{"number": 5, "html_url": "https://git.example.org/example/widgets/issues/5"}\n201' >"$ans/issues"
+	printf '[]\n200' >"$ans/issues_5_labels"
+	forgejo issue create --title "Show the host" --body-file "$tmp/pr-body" --label feature
+	if [ "$out" = "https://git.example.org/example/widgets/issues/5" ]; then ok; else bad "forge: issue create on Forgejo" "$out"; fi
+	sent "issue create labels the new issue by name" '{"labels":["feature"]}'
+	printf '{}\n201' >"$ans/issues_3_comments"
+	: >"$tmp/curl-answer.calls"
+	forgejo issue close 3 --duplicate-of 2
+	if [ "$(cat "$tmp/curl-answer.calls")" = 'POST issues_3_comments
+PATCH issues_3' ]; then ok; else bad "forge: issue close as a duplicate on Forgejo" "$(cat "$tmp/curl-answer.calls")"; fi
+	sent "issue close closes" '{"state":"closed"}'
+	printf '[{"name": "bug"}, {"name": "needs triage"}]\n200' >"$ans/labels"
+	forgejo label list
+	if [ "$out" = 'bug
+needs triage' ]; then ok; else bad "forge: label list on Forgejo" "$out"; fi
 	forgejo pr view seven
 	if [ $? -eq 2 ]; then ok; else bad "forge: a pull request that is no number" "$out"; fi
 	forgejo pr create --title "No body"
@@ -497,7 +559,19 @@ gh_ran "pr checkout on GitHub" "pr checkout 7 "
 github runs abc123
 gh_ran "runs on GitHub" "run list --commit abc123 --limit 50 --json databaseId,status --jq "
 github issue view 12
-gh_ran "issue view on GitHub" "issue view 12 --json number,title,state,author,labels,body,comments --jq "
+gh_ran "issue view on GitHub" "api repos/{owner}/{repo}/issues/12 --jq "
+github issue list --label draft
+gh_ran "issue list on GitHub" "issue list --state open --limit 100 --label draft --json number,state,title --jq "
+: >"$fg/body.md"
+github issue create --title "Show the host" --body-file body.md --type Feature --label ui --label lobby
+gh_ran "issue create on GitHub" "issue create --title Show the host --body-file body.md --type Feature --label ui,lobby "
+rm "$fg/body.md"
+github issue close 12 --not-planned
+if [ -z "$out" ]; then ok; else bad "forge: issue close on GitHub is silent" "$out"; fi
+github label list
+gh_ran "label list on GitHub" "label list --limit 200 --json name --jq "
+github issue close 12 --wontfix
+gh_ran "an unknown way to close" "usage: forge"
 github pr checks 7
 if printf '%s' "$out" | grep -q '^forge: no checks on #7'; then ok; else bad "forge: pr checks on GitHub without a list" "$out"; fi
 
@@ -510,8 +584,7 @@ PATCH
 body.json
 repos/{owner}/{repo}/pulls/7' ]; then ok; else bad "forge: api on GitHub runs gh api" "$out"; fi
 
-# triage-issue's relations script, against a fake gh that answers by path.
-relations="$root/.starling/skills/triage-issue/scripts/relations"
+# Issue relationships on GitHub, against a fake gh that answers by path.
 mkdir -p "$tmp/fakebin" && cat >"$tmp/fakebin/gh" <<'EOF'
 #!/bin/sh
 case $2 in
@@ -525,7 +598,7 @@ case $2 in
 esac
 EOF
 chmod +x "$tmp/fakebin/gh"
-out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 12 2>&1)
+out=$(cd "$fg" && PATH="$tmp/fakebin:$PATH" run "$forge" issue relations 12 2>&1)
 want='Blocked by:
   #3 open Fix the lobby crash
 Blocking:
@@ -535,16 +608,16 @@ Parent:
 Sub-issues:
   #13 closed Show the host
   #14 open Kick a player'
-if [ "$out" = "$want" ]; then ok; else bad "relations: an issue with relationships" "$out"; fi
-out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 13 2>&1)
+if [ "$out" = "$want" ]; then ok; else bad "forge: an issue with relationships" "$out"; fi
+out=$(cd "$fg" && PATH="$tmp/fakebin:$PATH" run "$forge" issue relations 13 2>&1)
 if [ "$(printf '%s\n' "$out" | grep -c '^  none$')" = 4 ]; then ok; else
-	bad "relations: an issue without any" "$out"
+	bad "forge: an issue without relationships" "$out"
 fi
-out=$(cd "$repo" && PATH="$tmp/fakebin:$PATH" run "$relations" 99 2>&1)
+out=$(cd "$fg" && PATH="$tmp/fakebin:$PATH" run "$forge" issue relations 99 2>&1)
 if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF 'cannot read "Blocked by" for #99'; then ok; else
-	bad "relations: GitHub fails" "$out"
+	bad "forge: issue relations when GitHub fails" "$out"
 fi
-expect "$repo" "relations: usage" 2 "usage: relations ISSUE" "$relations" twelve
+expect "$fg" "forge: issue relations usage" 2 "usage: forge" "$forge" issue relations twelve
 
 # finish-pr's wait-ci script, against a fake forge wrapper that keeps the
 # pull request's state in files: head (the head commit, or move, the one it

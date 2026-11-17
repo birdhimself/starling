@@ -22,4 +22,4 @@ graders:
 - name: tries-the-label
   type: tool_used
   tool: Bash
-  input_match: 'gh (pr edit|api).*7'
+  input_match: '(forge|gh) (pr edit|api).*7'

@@ -220,6 +220,15 @@ Starling works in repositories on GitHub and on Forgejo.
   see the run that marking a pull request ready starts. Forgejo's API
   has no job logs, so `pr checks --log-failed` reads them from the web
   route of the job a failed status links to.
+- **What a forge lacks, the wrapper refuses by name.** Forgejo has no
+  issue types, no sub-issues and no issue fields. `--type` and `issue sub`
+  fail there and say so, and `issue view` and `issue relations` print "not
+  on this forge" in their place, so an agent never mistakes a missing
+  concept for an empty one. What stands in, such as a label for the type
+  or a task list for the parts, is the repository's choice and belongs in
+  the policy of `triage-issue`; Starling picks none. Issue fields exist on
+  GitHub only and keep going through `forge api`, with ids from the
+  policy.
 - **Scripts find the wrapper next to themselves,** and `STARLING_FORGE`
   names another one, which is how the tests put a fake in its place. The
   wrapper itself is tested against a fake `curl` and a fake `gh`.
@@ -543,3 +552,8 @@ Checked on 2026-11-17 with Forgejo 15.0.11 and Forgejo Runner 12.13.2.
   an API token.
 - `gh issue view --comments` prints only the comments, not the issue,
   when its output is not a terminal.
+- Forgejo takes label names when labels are added to or removed from an
+  issue or a pull request, and only label ids when an issue is created.
+- An issue's dependencies are read at `issues/<n>/dependencies` and
+  `issues/<n>/blocks`, and written with the other issue's owner,
+  repository and number.

@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implements a GitHub issue given by number, such as `#456`, end to end. It reads the whole thread, settles open questions with the user before writing code, implements with tests, commits, and opens draft pull requests that close the issue on merge, splitting larger work into a stack of reviewable pull requests. Ends at the draft pull requests. Use when asked to implement, build, fix or work on an issue, or to turn an issue into a pull request. Do not use for refining an issue that is not ready (use `refine-draft-issues`), for classifying or linking issues (use `triage-issue`), for reviewing or merging pull requests, for a change that has no issue, or for opening a pull request for work that is already done (use `open-pr`).
+description: Implements an issue given by number, such as `#456`, end to end. It reads the whole thread, settles open questions with the user before writing code, implements with tests, commits, and opens draft pull requests that close the issue on merge, splitting larger work into a stack of reviewable pull requests. Ends at the draft pull requests. Use when asked to implement, build, fix or work on an issue, or to turn an issue into a pull request. Do not use for refining an issue that is not ready (use `refine-draft-issues`), for classifying or linking issues (use `triage-issue`), for reviewing or merging pull requests, for a change that has no issue, or for opening a pull request for work that is already done (use `open-pr`).
 argument-hint: "<issue>"
 ---
 
@@ -32,13 +32,15 @@ more specific than this skill.
 ## 1. Read the whole thread
 
 ```sh
-gh issue view <number> --comments
-gh api 'repos/{owner}/{repo}/issues/<number>/dependencies/blocked_by?per_page=100' \
-  --jq '.[] | "#\(.number) \(.state) \(.title)"'
-gh pr list --state open --search '<number> in:body'
+.starling/bin/forge issue view <number>
+.starling/bin/forge issue relations <number>
+.starling/bin/forge pr list --search '#<number>'
 ```
 
-Read every comment, not only the body. Later comments from the repository
+They print the issue with every comment, the issues that block it, and
+the open pull requests that name it. `.starling/bin/forge` works on
+whichever forge the repository is on. Read every comment, not only the
+body. Later comments from the repository
 owner supersede the body, and the comment that settles a question is often
 not the newest. When the body and a comment disagree, the comment wins.
 
@@ -137,12 +139,12 @@ and screenshots or recordings for interface changes. Name changes to the
 environment or services explicitly. Write the body to a file:
 
 ```sh
-gh pr create --draft --title "<plain sentence>" --body-file <path>
+.starling/bin/forge pr create --draft --title "<plain sentence>" --body-file <path>
 ```
 
 For a stack, `gh stack submit --auto` creates draft pull requests with
 generated titles; correct each with
-`gh pr edit <number> --title "..." --body-file <path>`.
+`.starling/bin/forge pr edit <number> --title "..." --body-file <path>`.
 
 ## 8. Keep a stack healthy
 

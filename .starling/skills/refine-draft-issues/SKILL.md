@@ -1,6 +1,6 @@
 ---
 name: refine-draft-issues
-description: Refines GitHub issues that are not ready to implement, labeled draft by default, into implementation-ready scope, acceptance criteria and validation, sets their type, labels and relationships through triage-issue, and takes the draft label off only once nothing is left to decide. Shows every change and waits for confirmation before writing. Use when asked to refine, groom, flesh out, tighten or unblock draft issues, or to make a vague issue ready to work on. Do not use for creating issues, for relabeling or linking issues that are not drafts (use `triage-issue`), for closing or deduplicating issues, for implementing an issue (use `implement-issue`), or for writing pull request descriptions.
+description: Refines issues that are not ready to implement, labeled draft by default, into implementation-ready scope, acceptance criteria and validation, sets their type, labels and relationships through triage-issue, and takes the draft label off only once nothing is left to decide. Shows every change and waits for confirmation before writing. Use when asked to refine, groom, flesh out, tighten or unblock draft issues, or to make a vague issue ready to work on. Do not use for creating issues, for relabeling or linking issues that are not drafts (use `triage-issue`), for closing or deduplicating issues, for implementing an issue (use `implement-issue`), or for writing pull request descriptions.
 argument-hint: "[issue]..."
 ---
 
@@ -17,7 +17,7 @@ look finished: an open question, written down, is a good outcome.
 - **Output:** each issue's title, body, type, labels and relationships
   updated after the user confirmed them, the unready label removed where
   nothing is left open, and a report.
-- **Never:** write to GitHub before the user confirmed the restated plan;
+- **Never:** write to the forge before the user confirmed the restated plan;
   replace the author's feature with a different one; touch issues outside
   the named set, apart from the other end of a confirmed relationship;
   create issues.
@@ -35,7 +35,7 @@ and sections the body needs beyond those below.
 Use exactly the issues the user named. Otherwise list the candidates:
 
 ```sh
-gh issue list --label draft --state open --limit 50
+.starling/bin/forge issue list --label draft
 ```
 
 with the policy's label in place of `draft`. Say which you are about to
@@ -44,8 +44,8 @@ work on. With more than a handful and none named, ask which to take.
 ## 2. Read the thread, the relationships, then the code
 
 For each issue, read the body and every comment
-(`gh issue view <number> --comments`) and its relationships, the way the
-`triage-issue` skill reads them. Later comments from the repository owner
+(`.starling/bin/forge issue view <number>`) and its relationships, the way
+the `triage-issue` skill reads them. Later comments from the repository owner
 supersede the body, and the comment that settles a question is often not
 the newest. When the body and a comment disagree, the comment wins.
 
@@ -73,8 +73,8 @@ Keep the author's intent: sharpen vague wording, do not swap the feature.
 A decision nobody has made, such as which of two behaviors is right or
 what a number should be, goes under **Open questions** instead of being
 picked. Prose may explain why one issue waits for another, but the
-relationship is the record. Do not hard-wrap the body: GitHub renders the
-line breaks.
+relationship is the record. Do not hard-wrap the body: the forge renders
+the line breaks.
 
 ## 4. Decide the metadata
 
@@ -107,7 +107,7 @@ Write each body to a file outside the repository, made with
 `mktemp "${TMPDIR:-/tmp}/issue-body.XXXXXX"`, then:
 
 ```sh
-gh issue edit <number> --title "..." --body-file <path>
+.starling/bin/forge issue edit <number> --title "..." --body-file <path>
 ```
 
 Set the confirmed metadata with the `triage-issue` skill, giving it the
