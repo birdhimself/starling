@@ -25,7 +25,7 @@ graders:
 - name: reads-the-thread
   type: tool_used
   tool: Bash
-  input_match: 'gh issue view 12.*--comments|gh issue view .*--comments.*12'
+  input_match: 'forge issue view #?12'
 - name: never-edits
   type: tool_used
   tool: Edit

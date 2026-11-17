@@ -1,6 +1,6 @@
 ---
 name: triage-issue
-description: Sets a GitHub issue's metadata by the repository's policy, including its type, labels and fields such as priority, its blocked-by and sub-issue relationships, and the draft label, and closes an issue as a duplicate or as not planned. Use when creating, classifying, relabeling, prioritizing, linking or closing an issue, or when another skill needs an issue's metadata set or read. Do not use for writing or rewriting an issue's body (use `refine-draft-issues`), for pull request labels, or for implementing an issue (use `implement-issue`).
+description: Sets an issue's metadata by the repository's policy, including its type, labels and fields such as priority, its blocked-by and sub-issue relationships, and the draft label, and closes an issue as a duplicate or as not planned. Use when creating, classifying, relabeling, prioritizing, linking or closing an issue, or when another skill needs an issue's metadata set or read. Do not use for writing or rewriting an issue's body (use `refine-draft-issues`), for pull request labels, or for implementing an issue (use `implement-issue`).
 argument-hint: "<issue> [what to set]"
 ---
 
@@ -17,7 +17,7 @@ may explain them, but never replaces them.
   body; and what to set, or a request to classify it from its content. A
   caller such as `refine-draft-issues` may give the exact metadata: then
   start at "Set it".
-- **Output:** the metadata set on GitHub and read back, and a report.
+- **Output:** the metadata set on the forge and read back, and a report.
 - **Never:** change an issue's title or body, except the body of an issue
   it creates; set a field value nobody decided, such as a priority; invent
   a label, type or field the repository does not have; close an issue
@@ -32,22 +32,28 @@ and the label that marks an unready issue. Follow it where it is more
 specific than this skill.
 
 Without a policy, set only what the request names, and only types and
-labels that exist: `gh label list --limit 200` lists the labels.
+labels that exist: `.starling/bin/forge label list` lists the labels.
+
+`.starling/bin/forge` works on whichever forge the repository is on. Not
+every forge has issue types, sub-issues or fields: where one is missing,
+the command says so. Then use what the policy names in its place, such as
+a label for the type or a task list in the parent for its parts. Without
+such a rule, leave it unset and report it.
 
 ## 1. Read the issue
 
 ```sh
-gh api 'repos/{owner}/{repo}/issues/<number>' \
-  --jq '{number, title, state, type: .type.name, labels: [.labels[].name]}'
-.starling/skills/triage-issue/scripts/relations <number>
+.starling/bin/forge issue view <number>
+.starling/bin/forge issue relations <number>
 ```
 
-`relations` prints the issues that block this one, the ones it blocks, its
-parent and its sub-issues. Read the body and comments as well
-(`gh issue view <number> --comments`) when classifying: ordering stated
-only in prose ("lands after #12", "depends on", "blocked by") is a missing
-blocked-by relationship, a split into parts is missing sub-issues, and a
-relationship the thread has since dropped is one to remove.
+`issue view` prints the title, state, type and labels, then the body and
+every comment. `issue relations` prints the issues that block this one,
+the ones it blocks, its parent and its sub-issues. Read the body and
+comments when classifying: ordering stated only in prose ("lands after
+#12", "depends on", "blocked by") is a missing blocked-by relationship, a
+split into parts is missing sub-issues, and a relationship the thread has
+since dropped is one to remove.
 
 ## 2. Decide
 
@@ -70,42 +76,41 @@ one line each with its reason, before setting it.
 
 ## 3. Set it
 
-Type and labels:
+Type and labels, each label option once per label:
 
 ```sh
-gh issue edit <number> --type "<type>" --add-label "<label>" --remove-label "<label>"
+.starling/bin/forge issue edit <number> --type "<type>" --add-label "<label>" --remove-label "<label>"
 ```
 
 Creating an issue, with the body in a file:
 
 ```sh
-gh issue create --title "<plain sentence>" --body-file <path> --type "<type>" --label "<label>"
+.starling/bin/forge issue create --title "<plain sentence>" --body-file <path> --type "<type>" --label "<label>"
 ```
 
-Fields, which `gh issue` cannot set, with the field id from the policy:
+Relationships, by issue number:
+
+```sh
+.starling/bin/forge issue block <number> --by <other>
+.starling/bin/forge issue sub <number> --of <parent>
+```
+
+Add `--remove` to take one away. A blocking or parent relationship is
+written from the other issue: to make this issue block another, run
+`issue block` for that one.
+
+Fields exist only on GitHub and have no subcommand. Set one through the
+API, with the field id from the policy:
 
 ```sh
 echo '{"issue_field_values":[{"field_id":<id>,"value":"<value>"}]}' |
-  gh api -X POST 'repos/{owner}/{repo}/issues/<number>/issue-field-values' --input -
+  .starling/bin/forge api -X POST 'repos/{owner}/{repo}/issues/<number>/issue-field-values' --input -
 ```
-
-Relationships take the other issue's numeric `id`, not its number:
-
-```sh
-id=$(gh api 'repos/{owner}/{repo}/issues/<other>' --jq .id)
-gh api -X POST 'repos/{owner}/{repo}/issues/<number>/dependencies/blocked_by' -F issue_id="$id"
-gh api -X POST 'repos/{owner}/{repo}/issues/<parent>/sub_issues' -F sub_issue_id="$id"
-```
-
-Remove one with
-`gh api -X DELETE 'repos/{owner}/{repo}/issues/<number>/dependencies/blocked_by/<id>'`
-or
-`gh api -X DELETE 'repos/{owner}/{repo}/issues/<parent>/sub_issue' -F sub_issue_id=<id>`.
-A blocking or parent relationship is written on the other issue.
 
 Closing, only when the user asked for it: a duplicate with
-`gh issue close <number> --duplicate-of <other>`, a rejected issue with
-`gh issue close <number> --reason "not planned"`. Do not label either.
+`.starling/bin/forge issue close <number> --duplicate-of <other>`, a
+rejected issue with `.starling/bin/forge issue close <number> --not-planned`.
+Do not label either.
 
 ## 4. Read it back
 
@@ -123,5 +128,5 @@ why. Name anything you left unset because nobody decided it.
   report it, do not create it.
 - A value needs a decision nobody made, such as a priority → leave it unset
   and say so.
-- `gh` cannot reach GitHub or lacks permission → report the error; do not
-  retry in a loop.
+- The forge cannot be reached or refuses for lack of permission → report
+  the error; do not retry in a loop.
