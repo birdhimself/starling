@@ -5,9 +5,10 @@
 #
 # Builds a small project with an installed copy of .starling/, an AGENTS.md
 # that imports the shared rules, a policy file for each issue skill, and an
-# origin remote with main pushed. The remote is a local repository, not
-# GitHub, so every gh call fails: the cases grade the commands the agent
-# runs and what it reports, not their effect on GitHub.
+# origin remote with main pushed. The remote is a local repository, so
+# .starling.conf names the forge, GitHub, which is out of reach: every call
+# to it fails, and the cases grade the commands the agent runs and what it
+# reports, not their effect on the forge.
 
 set -eu
 starling=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)
@@ -105,6 +106,9 @@ cat >.agents/policy/refine-draft-issues.md <<'EOF'
   needs an announcement on the dashboard, and why.
 - Propose `npm test` as the validation for library changes.
 EOF
+
+# The origin remote below is a local path, which names no forge.
+printf '[forge]\n\tkind = github\n' >.starling.conf
 
 git add -A
 git commit -q -F - <<'EOF'

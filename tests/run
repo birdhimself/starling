@@ -546,31 +546,27 @@ if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF 'cannot read "Blocked by" for
 fi
 expect "$repo" "relations: usage" 2 "usage: relations ISSUE" "$relations" twelve
 
-# finish-pr's wait-ci script, against a fake gh that keeps the pull
-# request's state in files: head (the head commit, or move, the one it moves
-# to while a run is watched), runs (one "id status" line per run), checks
-# (lines with pass or fail), subjects, and on-ready (runs that marking it
-# ready starts).
+# finish-pr's wait-ci script, against a fake forge wrapper that keeps the
+# pull request's state in files: head (the head commit, or move, the one it
+# moves to once its runs are read as finished), runs (one "id state" line per
+# run; reading them finishes the pending ones), checks (lines with pass or
+# fail), subjects, and on-ready (runs that marking it ready starts).
 waitci="$root/.starling/skills/finish-pr/scripts/wait-ci"
-mkdir -p "$tmp/cibin" && cat >"$tmp/cibin/gh" <<'EOF'
+mkdir -p "$tmp/cibin" && cat >"$tmp/cibin/forge" <<'EOF'
 #!/bin/sh
 s=$FAKE_CI
 case "$1 $2" in
 "pr view")
-	case "$*" in
-	*headRefOid*) cat "$s/head" ;;
-	*commits*) cat "$s/subjects" ;;
-	esac
+	echo "Number: $3"
+	echo "Head commit: $(cat "$s/head")"
+	echo "Commits:"
+	sed 's/^/  0123abc /' "$s/subjects"
 	;;
-"run list")
-	case "$*" in
-	*databaseId,status*) awk '$2 != "completed" { print $1 }' "$s/runs" ;;
-	*) awk '{ print $1 }' "$s/runs" ;;
-	esac
-	;;
-"run watch")
-	awk -v id="$3" '$1 == id { $2 = "completed" } { print }' "$s/runs" >"$s/runs.new" && mv "$s/runs.new" "$s/runs"
-	if [ -f "$s/move" ]; then mv "$s/move" "$s/head"; fi
+"runs abc123")
+	cat "$s/runs"
+	if grep -q pending "$s/runs"; then
+		sed 's/pending/completed/' "$s/runs" >"$s/runs.new" && mv "$s/runs.new" "$s/runs"
+	elif [ -f "$s/move" ]; then mv "$s/move" "$s/head"; fi
 	;;
 "pr checks")
 	cat "$s/checks"
@@ -581,12 +577,12 @@ case "$1 $2" in
 	if [ -f "$s/on-ready" ]; then cat "$s/on-ready" >>"$s/runs"; fi
 	;;
 *)
-	echo "fake gh: $*" >&2
+	echo "fake forge: $*" >&2
 	exit 1
 	;;
 esac
 EOF
-chmod +x "$tmp/cibin/gh"
+chmod +x "$tmp/cibin/forge"
 ci_state() { # RUNS CHECKS [SUBJECTS]
 	rm -rf "$tmp/ci" && mkdir "$tmp/ci" && echo abc123 >"$tmp/ci/head" &&
 		printf '%s' "$1" >"$tmp/ci/runs" && printf '%s\n' "$2" >"$tmp/ci/checks" &&
@@ -597,8 +593,8 @@ wait_ci() { # NAME WANT_STATUS WANT_TEXT ARGS...
 	shift 3
 	out=$(
 		cd "$repo" || exit 2
-		PATH="$tmp/cibin:$PATH" FAKE_CI="$tmp/ci" WAIT_CI_POLL=0 WAIT_CI_LIMIT=1
-		export PATH FAKE_CI WAIT_CI_POLL WAIT_CI_LIMIT
+		STARLING_FORGE="$tmp/cibin/forge" FAKE_CI="$tmp/ci" WAIT_CI_POLL=0 WAIT_CI_LIMIT=1
+		export STARLING_FORGE FAKE_CI WAIT_CI_POLL WAIT_CI_LIMIT
 		run "$waitci" "$@" 2>&1
 	)
 	status=$?
@@ -610,10 +606,10 @@ $out"
 wait_ci "wait-ci: no pull request" 2 "usage: wait-ci PR" ""
 wait_ci "wait-ci: not a number" 2 "usage: wait-ci PR" abc
 wait_ci "wait-ci: two pull requests" 2 "usage: wait-ci PR" 7 8
-ci_state '101 in_progress
+ci_state '101 pending
 ' 'build	pass'
 wait_ci "wait-ci: green" 0 "#7 head abc123" 7
-ci_state '101 in_progress
+ci_state '101 pending
 ' 'build	fail'
 wait_ci "wait-ci: red" 1 "build	fail" 7
 ci_state '101 completed
@@ -622,7 +618,7 @@ fixup! feat: add widgets'
 wait_ci "wait-ci: fixups refused" 1 "fixup! feat: add widgets" 7 --mark-ready
 ci_state '101 completed
 ' 'build	pass'
-printf '200 queued\n' >"$tmp/ci/on-ready"
+printf '200 pending\n' >"$tmp/ci/on-ready"
 wait_ci "wait-ci: marks ready and waits" 0 "build	pass" 7 --mark-ready
 if [ -f "$tmp/ci/ready" ] && grep -qx '200 completed' "$tmp/ci/runs"; then ok; else
 	bad "wait-ci: watched the runs marking it ready started" "$(cat "$tmp/ci/runs")"
@@ -634,7 +630,7 @@ if [ ! -f "$tmp/ci/ready" ]; then ok; else bad "wait-ci: a red draft is not mark
 ci_state '101 completed
 ' 'build	pass'
 wait_ci "wait-ci: no runs on ready" 0 "its checks stand" 7 --mark-ready
-ci_state '101 in_progress
+ci_state '101 pending
 ' 'build	pass'
 echo def456 >"$tmp/ci/move"
 wait_ci "wait-ci: the head moved" 4 "moved to def456" 7
@@ -669,8 +665,9 @@ fi
 list_threads twelve
 if [ $? -eq 2 ] && printf '%s\n' "$out" | grep -qF "usage: threads PR"; then ok; else bad "threads: usage" "$out"; fi
 
-# clean-merged-branches' report script, on a real repository. A fake gh
-# answers for merged pull requests from files named after the branch.
+# clean-merged-branches' report script, on a real repository. A fake forge
+# wrapper answers for merged pull requests from files named after the
+# branch.
 report="$root/.starling/skills/clean-merged-branches/scripts/report"
 br=$tmp/branches
 br_commit() { # FILE: commit a change to FILE on the current branch
@@ -693,19 +690,18 @@ git -C "$br" -c core.hooksPath=/dev/null -c commit.gpgsign=false cherry-pick reb
 git -C "$br" worktree add -q "$tmp/in-tree" in-tree && git -C "$br" worktree add -q "$tmp/dirty-tree" dirty-tree || exit 2
 echo change >"$tmp/dirty-tree/untracked"
 git -C "$br" branch current-one && git -C "$br" checkout -q current-one
-mkdir -p "$tmp/reportbin" "$tmp/prs" && cat >"$tmp/reportbin/gh" <<'EOF'
+mkdir -p "$tmp/reportbin" "$tmp/prs" && cat >"$tmp/reportbin/forge" <<'EOF'
 #!/bin/sh
-case "$1 $2" in
-"auth status") exit 0 ;;
-"pr list") if [ -f "$FAKE_PRS/$4" ]; then cat "$FAKE_PRS/$4"; else echo null; fi ;;
+case "$1 $2 $3 $4 $5" in
+"pr list --state merged --head") if [ -f "$FAKE_PRS/$6" ]; then cat "$FAKE_PRS/$6"; fi ;;
 *) exit 1 ;;
 esac
 EOF
-chmod +x "$tmp/reportbin/gh"
-echo "5 $(git -C "$br" rev-parse squashed)" >"$tmp/prs/squashed"
-echo "6 0123456789abcdef" >"$tmp/prs/moved"
+chmod +x "$tmp/reportbin/forge"
+echo "#5 merged $(git -C "$br" rev-parse squashed) https://forge.example/5 Squash it" >"$tmp/prs/squashed"
+echo "#6 merged 0123456789abcdef https://forge.example/6 Move it" >"$tmp/prs/moved"
 before=$(git -C "$br" for-each-ref)
-out=$(cd "$br" && PATH="$tmp/reportbin:$PATH" FAKE_PRS="$tmp/prs" && export PATH FAKE_PRS && run "$report" --base main 2>&1)
+out=$(cd "$br" && STARLING_FORGE="$tmp/reportbin/forge" FAKE_PRS="$tmp/prs" && export STARLING_FORGE FAKE_PRS && run "$report" --base main 2>&1)
 status=$?
 if [ "$status" -eq 0 ]; then ok; else bad "report: runs" "exit $status: $out"; fi
 report_row() { # NAME BRANCH STATUS EVIDENCE
@@ -725,15 +721,15 @@ report_row "commits not on the base" unique KEEP "1 commit(s) not on main"
 report_row "a squash merge at the tip" squashed CANDIDATE "merged in PR #5 at this tip"
 report_row "a merged pull request at another commit" moved KEEP "PR #6 merged at 012345678, not at this tip"
 if [ "$before" = "$(git -C "$br" for-each-ref)" ]; then ok; else bad "report: changes nothing" "refs changed"; fi
-out=$(cd "$br" && run "$report" --base main --no-github squashed nothing 2>&1)
+out=$(cd "$br" && run "$report" --base main --no-forge squashed nothing 2>&1)
 report_row "no pull request data" squashed KEEP "no pull request data"
 report_row "a missing branch" nothing MISSING "no such local branch"
 expect "$br" "report: an unknown base" 2 "base ref not found: nope" "$report" --base nope
 expect "$br" "report: an unknown option" 2 "usage: report" "$report" --force
 expect "$tmp" "report: outside a repository" 2 "not inside a git repository" "$report"
 
-# open-pr's context script, on a real repository. A fake gh prints the open
-# pull request from a file, and fails without that file.
+# open-pr's context script, on a real repository. A fake forge wrapper
+# prints the open pull request from a file, and fails without that file.
 context="$root/.starling/skills/open-pr/scripts/context"
 op=$tmp/open-pr
 op_commit() { # FILE MESSAGE: commit a change to FILE on the current branch
@@ -743,19 +739,19 @@ op_commit() { # FILE MESSAGE: commit a change to FILE on the current branch
 op_has() { # NAME WANT [BASE]: context exits 0 and prints WANT
 	name=$1 want=$2
 	shift 2
-	out=$(cd "$op" && PATH="$tmp/opbin:$PATH" FAKE_OPEN_PR="$tmp/op-answer" && export PATH FAKE_OPEN_PR && run "$context" "$@" 2>&1)
+	out=$(cd "$op" && STARLING_FORGE="$tmp/opbin/forge" FAKE_OPEN_PR="$tmp/op-answer" && export STARLING_FORGE FAKE_OPEN_PR && run "$context" "$@" 2>&1)
 	status=$?
 	if [ "$status" -eq 0 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
 		bad "open-pr context: $name" "expected exit 0 and \"$want\", got exit $status:
 $out"
 	fi
 }
-mkdir -p "$tmp/opbin" && cat >"$tmp/opbin/gh" <<'EOF'
+mkdir -p "$tmp/opbin" && cat >"$tmp/opbin/forge" <<'EOF'
 #!/bin/sh
-[ -f "$FAKE_OPEN_PR" ] || exit 1
+[ "$1 $2 $3 $4" = "pr list --head topic" ] && [ -f "$FAKE_OPEN_PR" ] || exit 1
 cat "$FAKE_OPEN_PR"
 EOF
-chmod +x "$tmp/opbin/gh"
+chmod +x "$tmp/opbin/forge"
 : >"$tmp/op-answer"
 {
 	git init -q -b main "$op" && git -C "$op" config user.name Test && git -C "$op" config user.email test@example.com &&
@@ -775,10 +771,10 @@ op_has "the commits" "feat: add a topic"
 op_has "the issues they name" "Refs: #12"
 op_has "no template" "Template: none"
 op_has "no open pull request" "Pull request: none"
-echo '#7 draft https://github.example/7' >"$tmp/op-answer"
-op_has "an open pull request" "Pull request: #7 draft https://github.example/7"
+echo '#7 draft 0123abc https://forge.example/7 Add a topic' >"$tmp/op-answer"
+op_has "an open pull request" "Pull request: #7 draft https://forge.example/7"
 rm "$tmp/op-answer"
-op_has "gh fails" "Pull request: unknown"
+op_has "the forge fails" "Pull request: unknown"
 : >"$tmp/op-answer"
 echo change >"$op/loose"
 op_has "uncommitted changes" "?? loose"
@@ -793,8 +789,8 @@ op_has "a pushed branch" "Branch: topic, pushed to origin/topic"
 { git -C "$op" branch --no-track develop origin/main && git -C "$op" push -q origin develop; } || exit 2
 op_has "a named base" "Base: origin/develop, " develop
 
-op_commit .github/PULL_REQUEST_TEMPLATE.md "docs: add a template"
-op_has "a template in any case" "Template: .github/PULL_REQUEST_TEMPLATE.md"
+op_commit .forgejo/PULL_REQUEST_TEMPLATE.md "docs: add a template"
+op_has "a template in any case" "Template: .forgejo/PULL_REQUEST_TEMPLATE.md"
 op_commit docs/pull_request_template.md "docs: add another template"
 op_has "several templates" "Template: several"
 

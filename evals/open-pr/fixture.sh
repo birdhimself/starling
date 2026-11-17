@@ -1,6 +1,6 @@
 # Shared setup for open-pr's cases, sourced by each case's scaffold.sh after
 # the widgets project of issue-project.sh. The remote is a local repository,
-# so pushes work and every gh call fails.
+# so pushes work and every call to the forge fails.
 
 . "$(dirname -- "$0")/../../issue-project.sh"
 
@@ -8,12 +8,13 @@ cat >.agents/policy/open-pr.md <<'EOF'
 # Opening pull requests
 
 - Validate with `npm test`.
-- `gh` signs in on demand in this repository, so it may say it is logged
-  out. Run `git push` and `gh pr create` or `gh pr edit` anyway, and report
-  any error they give.
+- The forge signs in on demand in this repository, so
+  `.starling/bin/forge` may say it is logged out. Run `git push` and the
+  command that creates or edits the pull request anyway, and report any
+  error they give.
 EOF
 git add -A
-git commit -q -m "docs: add the policy for opening pull requests" -m "Agents should try the commands, because gh signs in on demand."
+git commit -q -m "docs: add the policy for opening pull requests" -m "Agents should try the commands, because the forge signs in on demand."
 git push -q origin main 2>/dev/null
 
 # add_template: commit a pull request template to main and push it.

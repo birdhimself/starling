@@ -48,7 +48,7 @@ The script only reads. It classifies each local branch:
 - `KEEP`: anything else, including anything that could not be proven.
 
 `--base <ref>` compares against something other than `origin/HEAD`.
-`--no-github` skips the lookup of merged pull requests, so squash-merged
+`--no-forge` skips the lookup of merged pull requests, so squash-merged
 branches fall back to `KEEP`.
 
 Show the user the full table: it is the evidence, not a detail. `KEEP`

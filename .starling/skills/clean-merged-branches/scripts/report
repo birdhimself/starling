@@ -1,14 +1,14 @@
 #!/bin/sh
 # Starling: classify local branches for deletion.
 #
-#   report [--base REF] [--no-github] [BRANCH...]
+#   report [--base REF] [--no-forge] [BRANCH...]
 #
 # Prints a table of local branches, or of the BRANCHes given, with each
 # one's status, tip and the evidence for it. It only reads: it never deletes,
 # writes or fetches.
 #
 #   --base REF    compare against REF; by default origin/HEAD, else main
-#   --no-github   skip the lookup of merged pull requests
+#   --no-forge    skip the lookup of merged pull requests
 #
 # Status:
 #   PROTECTED  the base branch, the current branch, or a branch checked out
@@ -19,17 +19,21 @@
 #   KEEP       anything else, including anything that could not be proven
 #   MISSING    no such local branch
 #
+# The forge is reached through .starling/bin/forge; STARLING_FORGE names
+# another wrapper to use (tests set it to a fake).
+#
 # Exit status: 0, or 2 for a usage error, outside a repository, or an unknown
 # base.
 
 set -u
+forge=${STARLING_FORGE:-$(CDPATH='' cd -- "$(dirname -- "$0")/../../../bin" && pwd)/forge}
 
 usage() {
-	echo "usage: report [--base REF] [--no-github] [BRANCH...]" >&2
+	echo "usage: report [--base REF] [--no-forge] [BRANCH...]" >&2
 	exit 2
 }
 base=
-use_github=1
+use_forge=1
 selected=
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -38,8 +42,8 @@ while [ $# -gt 0 ]; do
 		base=$2
 		shift 2
 		;;
-	--no-github)
-		use_github=
+	--no-forge)
+		use_forge=
 		shift
 		;;
 	-*) usage ;;
@@ -72,9 +76,9 @@ worktrees=$(git worktree list --porcelain | awk '
 	/^worktree / { path = substr($0, 10) }
 	/^branch refs\/heads\// { print substr($0, 19) "\t" path }')
 
-have_github=
-if [ -n "$use_github" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-	have_github=1
+have_forge=
+if [ -n "$use_forge" ] && "$forge" pr list --state merged --head "$base_local" >/dev/null 2>&1; then
+	have_forge=1
 fi
 
 [ -n "$selected" ] || selected=$(git for-each-ref --format='%(refname:short)' refs/heads/)
@@ -122,13 +126,14 @@ while IFS= read -r branch; do
 	# A merged pull request proves the branch only at the commit that merged:
 	# the name may have been reused, or commits added since.
 	pr= pr_head=
-	if [ -n "$have_github" ]; then
-		merged=$(gh pr list --head "$branch" --state merged --limit 1 --json number,headRefOid \
-			--jq '.[0] | "\(.number) \(.headRefOid)"' 2>/dev/null) || merged=
+	if [ -n "$have_forge" ]; then
+		# The newest one, as "#NUMBER merged COMMIT URL TITLE".
+		merged=$("$forge" pr list --state merged --head "$branch" 2>/dev/null | awk 'NR == 1 && NF { print $1, $3 }') || merged=
 		case $merged in
-		'' | null*) ;;
+		'') ;;
 		*)
 			pr=${merged%% *}
+			pr=${pr#\#}
 			pr_head=${merged#* }
 			;;
 		esac
@@ -146,7 +151,7 @@ while IFS= read -r branch; do
 		row "$branch" CANDIDATE "$short" "merged in PR #$pr at this tip; $unique commit(s) not patch-equivalent (squash merge)"
 	elif [ -n "$pr" ]; then
 		row "$branch" KEEP "$short" "$unique commit(s) not on $base; PR #$pr merged at $(printf '%.9s' "$pr_head"), not at this tip"
-	elif [ -z "$have_github" ]; then
+	elif [ -z "$have_forge" ]; then
 		row "$branch" KEEP "$short" "$unique commit(s) not on $base; no pull request data"
 	else
 		row "$branch" KEEP "$short" "$unique commit(s) not on $base"

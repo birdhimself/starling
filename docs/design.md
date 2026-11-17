@@ -481,8 +481,10 @@ them:
   skill must not run.
 - The verb's contract becomes graders, e.g. `review-` never edits
   (`tool_used: Edit, max: 0`), `commit-` never pushes.
-- Mocks only cover MCP servers. Skills that call `gh` or `git` need fixture
-  repositories, built by the case's scaffold script.
+- Mocks only cover MCP servers. Skills that call the forge or `git` need
+  fixture repositories, built by the case's scaffold script. Their origin
+  is a local path, which names no forge, so the fixture's `.starling.conf`
+  says GitHub, which is then out of reach.
 - When any description changes, re-run every skill's "must not run" cases,
   because descriptions compete. Pilot new cases with `--runs 1`: most first
   failures are grader bugs.

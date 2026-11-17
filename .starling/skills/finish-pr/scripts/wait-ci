@@ -13,17 +13,20 @@
 # so only those runs check anything. If none start within the time limit,
 # the workflows do not run on that event, and the draft's checks stand.
 #
-# Runs are tracked by head commit, since `gh pr checks --watch` can return
-# before the runs of a ready_for_review event have registered.
+# Runs are tracked by head commit, since the runs that marking a pull
+# request ready starts can register after its checks were last read. The
+# forge is reached through .starling/bin/forge.
 #
 # Exit status: 0 green, 1 failed or refused, 2 usage, 3 no run appeared on
 # the head within the time limit, 4 the head moved while waiting (run it
 # again for the new head).
 #
 # WAIT_CI_POLL sets the seconds between polls (default 10), WAIT_CI_LIMIT
-# the seconds to wait for runs to appear (default 180).
+# the seconds to wait for runs to appear (default 180). STARLING_FORGE names
+# the forge wrapper to use (tests set it to a fake).
 
 set -u
+forge=${STARLING_FORGE:-$(CDPATH='' cd -- "$(dirname -- "$0")/../../../bin" && pwd)/forge}
 poll=${WAIT_CI_POLL:-10}
 limit=${WAIT_CI_LIMIT:-180}
 
@@ -45,26 +48,29 @@ for arg in "$@"; do
 done
 [ -n "$pr" ] || usage
 
-sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid) && [ -n "$sha" ] || {
+head_commit() {
+	facts=$("$forge" pr view "$pr") || return 1
+	printf '%s\n' "$facts" | sed -n 's/^Head commit: //p'
+}
+sha=$(head_commit) && [ -n "$sha" ] || {
 	echo "wait-ci: cannot read pull request #$pr" >&2
 	exit 1
 }
 echo "#$pr head $sha"
 
 run_ids() {
-	gh run list --commit "$sha" --limit 50 --json databaseId --jq '.[].databaseId' | sort
+	"$forge" runs "$sha" | awk '{ print $1 }' | sort
 }
 
 # watch_runs: until no run on the head is unfinished. Runs can register
 # late, so the list is read again after each pass.
 watch_runs() {
 	while :; do
-		pending=$(gh run list --commit "$sha" --limit 50 --json databaseId,status \
-			--jq '.[] | select(.status != "completed") | .databaseId') || return 1
-		[ -n "$pending" ] || return 0
-		for id in $pending; do
-			gh run watch "$id" --exit-status >/dev/null 2>&1 || :
-		done
+		list=$("$forge" runs "$sha") || return 1
+		case $list in
+		*pending*) ;;
+		*) return 0 ;;
+		esac
 		sleep "$poll"
 	done
 }
@@ -84,7 +90,7 @@ new_runs() {
 }
 
 if [ -n "$mark" ]; then
-	fixups=$(gh pr view "$pr" --json commits --jq '.commits[].messageHeadline' | grep -E '^(fixup|squash|amend)!')
+	fixups=$("$forge" pr view "$pr" | sed -n '/^Commits:/,$s/^  [0-9a-f]* //p' | grep -E '^(fixup|squash|amend)!')
 	if [ -n "$fixups" ]; then
 		printf 'wait-ci: fold these into the commits they correct first:\n%s\n' "$fixups" >&2
 		exit 1
@@ -98,24 +104,24 @@ fi
 
 if [ -n "$mark" ]; then
 	watch_runs
-	if ! gh pr checks "$pr" >/dev/null 2>&1; then
-		gh pr checks "$pr"
+	if ! checks=$("$forge" pr checks "$pr" 2>&1); then
+		printf '%s\n' "$checks"
 		echo "wait-ci: the draft's checks are not green; not marking it ready" >&2
 		exit 1
 	fi
 	before=$(run_ids)
-	gh pr ready "$pr" || exit 1
+	"$forge" pr ready "$pr" || exit 1
 	new_runs "$before" ||
 		echo "wait-ci: no run started when #$pr was marked ready; its checks stand"
 fi
 
 watch_runs
 
-# gh pr checks reports the current head, so a push during the wait would
-# make it describe a commit this script never watched.
-current=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+# The checks are those of the current head, so a push during the wait would
+# make them describe a commit this script never watched.
+current=$(head_commit)
 if [ "$current" != "$sha" ]; then
 	echo "wait-ci: #$pr moved to $current while waiting on $sha; run it again" >&2
 	exit 4
 fi
-gh pr checks "$pr" || exit 1
+"$forge" pr checks "$pr" || exit 1

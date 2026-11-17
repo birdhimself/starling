@@ -7,7 +7,7 @@
 # fix/12-singular-label, pushed to the local origin. Its commit makes a
 # label for one widget read "1 widget", with a test, but the command line
 # tool passes the count as a string, so it still prints "1 widgets": a
-# defect a reviewer can find. GitHub is out of reach, so gh fails.
+# defect a reviewer can find. The forge is out of reach.
 
 . "$(dirname -- "$0")/../../issue-project.sh"
 

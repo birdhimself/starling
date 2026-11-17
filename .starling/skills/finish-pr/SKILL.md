@@ -31,11 +31,17 @@ longer test suites, and how long CI usually takes.
 ## 1. Read the pull request
 
 ```sh
-gh pr view <number> --json number,url,isDraft,state,headRefName,baseRefName,mergeStateStatus,commits \
-  --jq '{number, url, isDraft, state, headRefName, baseRefName, mergeStateStatus, subjects: [.commits[].messageHeadline]}'
+.starling/bin/forge pr view <number>
 ```
 
-Stop if it is closed or merged. To change the branch, work on its head
+Without a number it reads the current branch's pull request. It prints
+`State:`, `Draft:`, `Head:`, `Base:`, `Behind base:` and, under
+`Commits:`, each commit's subject. Stop if the state is closed or merged.
+
+`.starling/bin/forge` works on whichever forge the repository is on. When
+it cannot reach the forge, go on with what needs only git: read the
+subjects with `git log`, fold and push as the next step says, and then
+report that the checks could not be read. To change the branch, work on its head
 branch in a clean checkout of it.
 
 ## 2. Fold leftovers
@@ -44,7 +50,7 @@ When a subject starts with `fixup!`, `squash!` or `amend!`, fold it into
 the commit it corrects with the `commit-changes` skill, telling it to fold
 the pushed commit now, then push with `git push --force-with-lease`.
 
-When `mergeStateStatus` is `BEHIND` and the base requires up-to-date
+When `Behind base:` says `yes` and the base requires up-to-date
 branches, rebase onto the base, `git fetch origin && git rebase
 origin/<base>`, validate as `AGENTS.md` says, and push with lease. For a
 branch in a `gh stack`, run `gh stack sync` instead. On a conflict, stop
@@ -73,8 +79,9 @@ waits for the runs that marking it ready starts. Its exit status:
 
 ## 4. Fix one failure
 
-When a check fails, read its log, `gh run view <run-id> --log-failed`, and
-name the mechanism. A rerun can confirm a pass but never clears a failure:
+When a check fails, read its log,
+`.starling/bin/forge pr checks <number> --log-failed`, and name the
+mechanism. A rerun can confirm a pass but never clears a failure:
 blaming flakiness needs evidence for that specific cause.
 
 Fix the cause in the commit it belongs to, with the `commit-changes`
@@ -96,3 +103,5 @@ with its cause. Do not merge: merging is the maintainer's call.
   with the output.
 - No CI runs on the head commit → report it; do not mark the pull request
   ready without checks.
+- The forge cannot be reached → fold and push all the same, then report
+  that the checks could not be read; do not mark the pull request ready.

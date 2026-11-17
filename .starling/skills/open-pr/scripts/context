@@ -8,12 +8,14 @@
 # rebase or merge in progress, the branch's commits and the issues they name,
 # uncommitted changes, the repository's pull request template and the open
 # pull request for the branch. It only reads. Run git fetch first for an
-# up-to-date comparison.
+# up-to-date comparison. The forge is reached through .starling/bin/forge;
+# STARLING_FORGE names another wrapper to use (tests set it to a fake).
 #
 # Exit status: 0, or 2 outside a work tree, without a base, or for a usage
 # error.
 
 set -u
+forge=${STARLING_FORGE:-$(CDPATH='' cd -- "$(dirname -- "$0")/../../../bin" && pwd)/forge}
 
 [ $# -le 1 ] || {
 	echo "usage: context [BASE]" >&2
@@ -94,11 +96,11 @@ else
 	echo "  none"
 fi
 
-# GitHub's template locations: the root, docs/ and .github/, as one file or
-# as a folder of them, with the name in any case.
+# The forges' template locations: the root, docs/ and the forge's own
+# folder, as one file or as a folder of them, with the name in any case.
 templates=$(git ls-files | awk '{ p = tolower($0) }
-	p ~ /^(\.github\/|docs\/)?pull_request_template(\.md|\.txt)?$/ { print }
-	p ~ /^(\.github\/|docs\/)?pull_request_template\/[^\/]+\.(md|txt)$/ { print }')
+	p ~ /^(\.github\/|\.forgejo\/|\.gitea\/|docs\/)?pull_request_template(\.md|\.txt)?$/ { print }
+	p ~ /^(\.github\/|\.forgejo\/|\.gitea\/|docs\/)?pull_request_template\/[^\/]+\.(md|txt)$/ { print }')
 case $templates in
 '') echo "Template: none" ;;
 *'
@@ -109,12 +111,13 @@ case $templates in
 *) echo "Template: $templates" ;;
 esac
 
-# gh fails when it is missing, signed out or cannot reach GitHub.
+# The wrapper fails when the forge's tool is missing, signed out or cannot
+# reach the forge. Its lines are "#NUMBER STATE COMMIT URL TITLE".
 if [ -z "$branch" ]; then
 	echo "Pull request: none"
-elif found=$(gh pr list --head "$branch" --state open --limit 1 --json number,isDraft,url \
-	--jq '.[0] | select(. != null) | "#\(.number) \(if .isDraft then "draft" else "ready" end) \(.url)"' 2>/dev/null); then
+elif found=$("$forge" pr list --head "$branch" 2>/dev/null); then
+	found=$(printf '%s\n' "$found" | awk 'NR == 1 && NF { print $1, $2, $4 }')
 	echo "Pull request: ${found:-none}"
 else
-	echo "Pull request: unknown, gh could not say"
+	echo "Pull request: unknown, the forge could not say"
 fi
