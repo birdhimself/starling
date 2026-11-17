@@ -110,9 +110,9 @@ line for every commit, amend and rebase step (`commit: <subject>`,
 - The runner loads only the plugin under test, never a repository's own
   skills. Do not link the skill under test into the fixture's
   `.claude/skills/`.
-- Mocks exist only for MCP servers. A skill that calls `git` or `gh` needs
-  a fixture repository; there is no network access to GitHub, so a case
-  checks the commands the agent ran, not their effect on GitHub.
+- Mocks exist only for MCP servers. A skill that calls `git` or the forge
+  needs a fixture repository; there is no network access to the forge, so
+  a case checks the commands the agent ran, not their effect on it.
 - Empty or reset what graders read, such as `.git/logs/HEAD`, at the end
   of the scaffold, so that they see only what the agent did.
 

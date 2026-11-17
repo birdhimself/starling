@@ -21,7 +21,7 @@ graders:
 - name: lists-the-threads
   type: tool_used
   tool: Bash
-  input_match: 'resolve-review-threads/scripts/threads 7'
+  input_match: 'forge pr threads #?7'
 - name: resolves-nothing
   type: tool_used
   tool: Bash

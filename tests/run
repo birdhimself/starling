@@ -79,6 +79,11 @@ missing=$({ find "$root/.starling" "$root/docs" -name '*.md' && echo "$root/READ
 done)
 if [ -z "$missing" ]; then ok; else bad "instructions: named paths exist" "$missing"; fi
 
+# Starling's skills and shared rules reach the forge through the wrapper,
+# so none of them names GitHub's command line tool.
+found=$(grep -rnw gh "$root/.starling/skills" "$root/.starling/AGENTS.md")
+if [ -z "$found" ]; then ok; else bad "skills: none names gh" "$found"; fi
+
 # The README lists every skill.
 missing=$(for dir in "$root"/.starling/skills/*/; do
 	name=$(basename "$dir")
@@ -501,6 +506,39 @@ PATCH issues_3' ]; then ok; else bad "forge: issue close as a duplicate on Forge
 	forgejo label list
 	if [ "$out" = 'bug
 needs triage' ]; then ok; else bad "forge: label list on Forgejo" "$out"; fi
+	# Review threads: the comments on one line of one file are a thread,
+	# named after its first comment.
+	comment() { # ID LOGIN BODY POSITION RESOLVER
+		printf '{"id": %s, "user": {"login": "%s"}, "body": "%s", "path": "lib/label.js", "position": %s, "original_position": 0, "resolver": %s}' "$@"
+	}
+	printf '[{"id": 1, "comments_count": 2, "body": "Two remarks.", "state": "REQUEST_CHANGES", "submitted_at": "2026-01-02T00:00:00Z", "user": {"login": "grace"}}, {"id": 2, "comments_count": 1, "body": "", "state": "COMMENT", "submitted_at": "2026-01-03T00:00:00Z", "user": {"login": "ada"}}, {"id": 3, "comments_count": 0, "body": "", "state": "COMMENT", "submitted_at": "2026-01-04T00:00:00Z", "user": {"login": "ada"}}]\n200' >"$ans/pulls_7_reviews"
+	{ printf '[' && comment 41 grace "Why a string?\\nIt is a count." 4 null && printf ',' &&
+		comment 42 grace "Rename this." 9 '{"login": "ada"}' && printf ']\n200'; } >"$ans/pulls_7_reviews_1_comments"
+	{ printf '[' && comment 43 ada "It is parsed below." 4 null && printf ']\n200'; } >"$ans/pulls_7_reviews_2_comments"
+	forgejo pr threads 7
+	want='Thread 41 on lib/label.js:4
+  grace: Why a string?
+    It is a count.
+  ada: It is parsed below.'
+	if [ "$out" = "$want" ]; then ok; else bad "forge: pr threads on Forgejo" "$out"; fi
+	forgejo pr threads 7 --all
+	if printf '%s\n' "$out" | grep -qx 'Thread 42 on lib/label.js:9, resolved'; then ok; else bad "forge: pr threads --all" "$out"; fi
+	forgejo pr reply 7 41 --body "Parsed now."
+	sent "pr reply is a comment on the thread's line" \
+		'{"event":"COMMENT","body":"","comments":[{"path":"lib/label.js","body":"Parsed now.","new_position":4,"old_position":0}]}'
+	forgejo pr reply 7 99 --body "Nothing there."
+	if [ $? -eq 1 ] && [ "$out" = "forge: #7 has no review thread 99" ]; then ok; else bad "forge: pr reply to no thread" "$out"; fi
+	forgejo pr resolve 7 41
+	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "cannot resolve a review thread"; then ok; else bad "forge: pr resolve on Forgejo" "$out"; fi
+	printf '[{"created_at": "2026-01-01T00:00:00Z", "user": {"login": "ada"}, "body": "Ready for a look."}]\n200' >"$ans/issues_7_comments"
+	forgejo pr comments 7
+	want='ada, comment:
+  Ready for a look.
+
+grace, review, request_changes:
+  Two remarks.'
+	if [ "$out" = "$want" ]; then ok; else bad "forge: pr comments on Forgejo" "$out"; fi
+
 	forgejo pr view seven
 	if [ $? -eq 2 ]; then ok; else bad "forge: a pull request that is no number" "$out"; fi
 	forgejo pr create --title "No body"
@@ -529,9 +567,63 @@ EOF
 	git -C "$fg" checkout -q main 2>/dev/null
 fi
 
+# A stack on Forgejo, as far as git alone carries it: the branches, moving
+# between them, and rebasing the upper ones after the bottom one changed.
+st=$tmp/stack
+st_commit() { # FILE MESSAGE
+	echo "$1" >>"$st/$1" && git -C "$st" add -A &&
+		git -C "$st" -c commit.gpgsign=false commit -q -m "$2" || exit 2
+}
+st_forge() { # ARGS...
+	out=$(cd "$st" && run "$forge" stack "$@" 2>&1)
+}
+{
+	git init -q -b main "$st" && git -C "$st" config user.name Test && git -C "$st" config user.email test@example.com &&
+		git init -q --bare "$tmp/stack-origin.git" && git -C "$st" remote add origin "$tmp/stack-origin.git" &&
+		printf '[forge]\n\tkind = forgejo\n' >"$st/.starling.conf"
+} || exit 2
+st_commit base "feat: start"
+{ git -C "$st" push -q -u origin main && git -C "$st" remote set-head origin main; } || exit 2
+st_forge view
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "no stack in this work tree"; then ok; else bad "stack: none yet" "$out"; fi
+st_forge init one two
+if [ $? -eq 0 ] && [ "$out" = "Stack on main, bottom first: one two. Now on one." ] &&
+	[ "$(git -C "$st" symbolic-ref --short HEAD)" = one ]; then ok; else bad "stack: init" "$out"; fi
+st_commit one-file "feat: add one"
+st_forge up
+st_commit two-file "feat: add two"
+st_forge add three
+st_commit three-file "feat: add three"
+st_forge down
+if [ "$(git -C "$st" symbolic-ref --short HEAD)" = two ]; then ok; else bad "stack: add, then down" "$out"; fi
+st_forge bottom
+if [ "$(git -C "$st" symbolic-ref --short HEAD)" = one ]; then ok; else bad "stack: bottom" "$out"; fi
+st_forge checkout nope
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "no such branch"; then ok; else bad "stack: checkout of another branch" "$out"; fi
+echo more >>"$st/one-file" && git -C "$st" -c commit.gpgsign=false commit -q -a --amend --no-edit || exit 2
+st_forge rebase --upstack
+if [ $? -eq 0 ] && git -C "$st" merge-base --is-ancestor one two && git -C "$st" merge-base --is-ancestor two three &&
+	[ "$(git -C "$st" rev-list --count main..three)" = 3 ] && [ "$(git -C "$st" symbolic-ref --short HEAD)" = one ]; then ok; else
+	bad "stack: rebase --upstack after the bottom changed" "$out
+$(git -C "$st" log --oneline --all --graph)"
+fi
+st_forge push
+if [ $? -eq 0 ] && [ "$(git -C "$st" rev-parse origin/three)" = "$(git -C "$st" rev-parse three)" ]; then ok; else bad "stack: push" "$out"; fi
+echo early >"$st/three-file" && git -C "$st" add -A && git -C "$st" -c commit.gpgsign=false commit -q -m "feat: take three's file" || exit 2
+st_forge rebase --upstack
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "forge stack rebase --continue"; then ok; else bad "stack: a conflict stops the rebase" "$out"; fi
+echo resolved >"$st/three-file" && git -C "$st" add -A || exit 2
+st_forge rebase --continue
+if [ $? -eq 0 ] && git -C "$st" merge-base --is-ancestor two three; then ok; else bad "stack: rebase --continue" "$out"; fi
+st_forge merge 7
+if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "one pull request at a time"; then ok; else bad "stack: merge on Forgejo" "$out"; fi
+
 # On GitHub, the wrapper runs gh. A fake gh prints its arguments, one per
 # line, and the --jq filter is not run.
-mkdir -p "$tmp/ghapibin" && printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' >"$tmp/ghapibin/gh" && chmod +x "$tmp/ghapibin/gh"
+mkdir -p "$tmp/ghapibin" && printf '#!/bin/sh\nprintf "%%s\\n" "$@"\nprintf "%%s " "$@" >"$FAKE_GH_LAST"\n' >"$tmp/ghapibin/gh" &&
+	chmod +x "$tmp/ghapibin/gh"
+FAKE_GH_LAST=$tmp/gh-last
+export FAKE_GH_LAST
 git -C "$fg" remote set-url origin https://github.com/example/widgets.git
 github() { # ARGS...: run forge in $fg with the fake gh, its arguments on one line
 	out=$(cd "$fg" && PATH="$tmp/ghapibin:$PATH" run "$forge" "$@" 2>&1 | tr '\n' ' ')
@@ -570,6 +662,23 @@ github issue close 12 --not-planned
 if [ -z "$out" ]; then ok; else bad "forge: issue close on GitHub is silent" "$out"; fi
 github label list
 gh_ran "label list on GitHub" "label list --limit 200 --json name --jq "
+github pr threads 12
+gh_ran "pr threads on GitHub" "api graphql -F owner={owner} -F repo={repo} -F pr=12 -f query="
+case $out in *'false as $all'*) ok ;; *) bad "forge: pr threads lists the unresolved" "$out" ;; esac
+github pr threads 12 --all
+case $out in *'true as $all'*) ok ;; *) bad "forge: pr threads --all on GitHub" "$out" ;; esac
+github pr reply 12 PRRT_abc --body "Fixed in 0123abc."
+out=$(cat "$tmp/gh-last")
+gh_ran "pr reply on GitHub" "api graphql -F thread=PRRT_abc -f body=Fixed in 0123abc. -f query="
+case $out in *addPullRequestReviewThreadReply*) ok ;; *) bad "forge: pr reply adds a reply to the thread" "$out" ;; esac
+github pr resolve 12 PRRT_abc
+out=$(cat "$tmp/gh-last")
+gh_ran "pr resolve on GitHub" "api graphql -F thread=PRRT_abc -f query="
+case $out in *resolveReviewThread*) ok ;; *) bad "forge: pr resolve resolves the thread" "$out" ;; esac
+github pr comments 12
+gh_ran "pr comments on GitHub" "pr view 12 --json comments,reviews --jq "
+github stack view --short
+gh_ran "stack on GitHub is the stack extension" "stack view --short "
 github issue close 12 --wontfix
 gh_ran "an unknown way to close" "usage: forge"
 github pr checks 7
@@ -709,34 +818,6 @@ echo def456 >"$tmp/ci/move"
 wait_ci "wait-ci: the head moved" 4 "moved to def456" 7
 ci_state '' 'build	pass'
 wait_ci "wait-ci: no runs at all" 3 "no run appeared on abc123" 7
-
-# resolve-review-threads' threads script, against a fake gh that records its
-# arguments. GitHub's GraphQL and jq are not run here.
-threads="$root/.starling/skills/resolve-review-threads/scripts/threads"
-mkdir -p "$tmp/threadbin" && cat >"$tmp/threadbin/gh" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$@" >"$FAKE_ARGS"
-case "$*" in *pr=99*) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;; esac
-echo "No unresolved review threads."
-EOF
-chmod +x "$tmp/threadbin/gh"
-list_threads() { # ARGS...
-	out=$(cd "$repo" && PATH="$tmp/threadbin:$PATH" FAKE_ARGS="$tmp/threadargs" && export PATH FAKE_ARGS && run "$threads" "$@" 2>&1)
-}
-list_threads 12
-if [ $? -eq 0 ] && grep -qx 'pr=12' "$tmp/threadargs" && grep -qx 'owner={owner}' "$tmp/threadargs" &&
-	grep -q '^false as \$all' "$tmp/threadargs"; then ok; else
-	bad "threads: asks GitHub for the unresolved threads" "$out
-$(cat "$tmp/threadargs")"
-fi
-list_threads 12 --all
-if grep -q '^true as \$all' "$tmp/threadargs"; then ok; else bad "threads: --all" "$(cat "$tmp/threadargs")"; fi
-list_threads 99
-if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "cannot read the review threads of #99"; then ok; else
-	bad "threads: GitHub fails" "$out"
-fi
-list_threads twelve
-if [ $? -eq 2 ] && printf '%s\n' "$out" | grep -qF "usage: threads PR"; then ok; else bad "threads: usage" "$out"; fi
 
 # clean-merged-branches' report script, on a real repository. A fake forge
 # wrapper answers for merged pull requests from files named after the

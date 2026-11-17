@@ -53,7 +53,7 @@ the pushed commit now, then push with `git push --force-with-lease`.
 When `Behind base:` says `yes` and the base requires up-to-date
 branches, rebase onto the base, `git fetch origin && git rebase
 origin/<base>`, validate as `AGENTS.md` says, and push with lease. For a
-branch in a `gh stack`, run `gh stack sync` instead. On a conflict, stop
+branch in a stack, run `.starling/bin/forge stack sync` instead. On a conflict, stop
 and report it: resolving it changes the pull request.
 
 ## 3. Wait for CI

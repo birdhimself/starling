@@ -1,6 +1,6 @@
 ---
 name: ship-issue-batch
-description: Ships several GitHub issues at once in Claude Code. It surveys them all, settles every question in one round, implements each in its own worktree agent in parallel, has every pull request reviewed by a fresh agent, applies the findings, and brings each pull request to ready. With --stack it joins every pull request into one GitHub stack, so the batch merges in one step. Ends at ready pull requests, never merged. Use when asked to ship, deliver or implement several issues together, in parallel or as a batch. Do not use for a single issue (use `ship-issue`), for implementing without review (use `implement-issue`), for answering review threads (use `resolve-review-threads`), for refining draft issues (use `refine-draft-issues`), or for merging.
+description: Ships several issues at once in Claude Code. It surveys them all, settles every question in one round, implements each in its own worktree agent in parallel, has every pull request reviewed by a fresh agent, applies the findings, and brings each pull request to ready. With --stack it joins every pull request into one stack, each based on the one below, so the batch merges in order. Ends at ready pull requests, never merged. Use when asked to ship, deliver or implement several issues together, in parallel or as a batch. Do not use for a single issue (use `ship-issue`), for implementing without review (use `implement-issue`), for answering review threads (use `resolve-review-threads`), for refining draft issues (use `refine-draft-issues`), or for merging.
 argument-hint: "<issue>... [--stack]"
 ---
 
@@ -45,8 +45,9 @@ and what each issue's dossier must settle.
   larger.
 - When the setup takes a slot, give every running agent a distinct one
   from 1 to 9.
-- With `--stack`, `gh stack` is required: if `gh stack --help` fails, stop
-  and say so.
+- With `--stack`, `.starling/bin/forge stack view` must not say that a
+  tool is missing; if it does, stop and say so. That there is no stack
+  yet is the expected answer.
 
 ## Modes
 
@@ -54,10 +55,9 @@ and what each issue's dossier must settle.
   branch, each made ready once its own checks are green. If the base
   requires up-to-date branches, every merge sends the next pull request
   through a rebase and another CI run.
-- **`--stack`:** after review, every pull request joins one GitHub stack
-  in an agreed order. `gh stack merge <number>` merges every pull request
-  up to and including that one in one step, so the user merges the batch,
-  or its lower part, at once. The price is coupling: taking a pull request
+- **`--stack`:** after review, every pull request joins one stack in an
+  agreed order, each based on the one below, so the user merges the batch,
+  or its lower part, bottom first without rebasing in between. The price is coupling: taking a pull request
   out of the middle, or amending a lower one, rebases everything above it
   and runs its checks again. Steps marked _stack_ apply only in this mode.
 
@@ -164,21 +164,25 @@ pushed, and nothing in it is undecided.
    `git worktree add --detach {PRIMARY}/.claude/worktrees/ship-stack-<first issue> origin/<default>`,
    and prepare it as the policy says, with a free slot.
 3. In it, adopt every branch in the agreed order, bottom first, and
-   rebase: `gh stack init <branch>...`, then `gh stack rebase`.
-4. Check `git status` after every rebase: `gh stack rebase` exits 0 even
-   when it stops on a conflict. Resolve conflicts there, resuming the
+   rebase: `.starling/bin/forge stack init <branch>...`, then
+   `.starling/bin/forge stack rebase`.
+4. Check `git status` after every rebase: it can exit 0 even when it
+   stopped on a conflict. Resolve conflicts there, resuming the
    implementer of the branch being rebased, with the worktree's path, for
    anything beyond the obvious. Then `git add` the files and
-   `gh stack rebase --continue`.
+   `.starling/bin/forge stack rebase --continue`.
 5. Validate the top of the stack, the whole batch combined, with the
    validation `AGENTS.md` gives for a change that touches everything.
-6. `gh stack submit --auto` pushes every branch, sets each pull request's
-   base to the one below it, and creates the stack. Check with
-   `gh stack view --short` and `gh pr view <number> --json baseRefName`.
+6. `.starling/bin/forge stack submit --auto` pushes every branch and sets
+   each pull request's base to the one below it. Check with
+   `.starling/bin/forge stack view` and, for each pull request, the
+   `Base:` line of `.starling/bin/forge pr view <number>`.
 
 From here on, change the batch only in the stack worktree, one agent at a
-time: `gh stack checkout <branch>`, amend, then `gh stack rebase --upstack`
-and `gh stack push`. Implementer worktrees are detached and stale.
+time: `.starling/bin/forge stack checkout <branch>`, amend, then
+`.starling/bin/forge stack rebase --upstack` and
+`.starling/bin/forge stack push`. Implementer worktrees are detached and
+stale.
 
 ## 7. Bring each pull request to ready
 
@@ -199,19 +203,21 @@ For each issue, in batch order, _stack:_ in stack order:
   the user asks, with the `triage-issue` skill.
 
 _Stack:_ also the order, the stack worktree's path, and how to merge:
-`gh stack merge <number>` merges every pull request up to and including
-that one. After merging a lower part, run `gh stack sync` in the stack
-worktree if the rest reports being out of date.
+`.starling/bin/forge stack merge <number>` merges every pull request up
+to and including that one in one step where the forge can; where it says
+it cannot, the pull requests merge one at a time, bottom first. After
+merging a lower part, run `.starling/bin/forge stack sync` in the stack
+worktree, which moves the rest onto the base.
 
 Do not merge: merging is the user's call, after their own test.
 
 ## Teardown
 
 Keep implementer worktrees until their pull requests merge: they hold the
-branches and, for an issue with its own stack, the local `gh stack` state.
+branches and, for an issue with its own stack, the stack's local state.
 _Stack:_ keep the stack worktree until the whole stack has merged; a stack
-whose worktree is gone can be brought back with
-`gh stack checkout <number>`. Claude Code locks its agents' worktrees while
+whose worktree is gone is rebuilt in a new one with
+`.starling/bin/forge stack init <branch>...`, bottom first. Claude Code locks its agents' worktrees while
 the session runs: do not force those locks. After a merge, remove a
 worktree with `git worktree remove`.
 

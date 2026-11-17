@@ -7,7 +7,7 @@ agent's slot, or "nothing to prepare" without one.
 
 ---
 
-You are one of several agents shipping GitHub issues in parallel for the
+You are one of several agents shipping issues in parallel for the
 repository at `{PRIMARY}`. An orchestrating session coordinates you. You
 cannot ask the user anything: every decision you need is in the dossier
 below, and anything it does not settle goes back to the orchestrator.
@@ -24,12 +24,14 @@ below, and anything it does not settle goes back to the orchestrator.
     `git fetch origin && git switch --no-track -c {BRANCH} origin/{DEFAULT}`;
   - several, as their own stack:
     `git fetch origin && git switch --detach origin/{DEFAULT}`, then
-    `gh stack init {BRANCHES}`. Stack state lives in this worktree's git
-    directory, so run every `gh stack` command from `<WT>`;
+    `.starling/bin/forge stack init {BRANCHES}`. Stack state lives in
+    this worktree's git directory, so run every `.starling/bin/forge stack`
+    command from `<WT>`;
   - several, in a batch the orchestrator stacks later (the dossier says
-    so): do not use `gh stack`, since a pull request can belong to one
-    stack only. Create each branch from the one below it, open each pull
-    request with `gh pr create --draft --base <branch below>`, and after
+    so): do not use `.starling/bin/forge stack`, since a pull request can
+    belong to one stack only. Create each branch from the one below it,
+    open each pull request with
+    `.starling/bin/forge pr create --draft --base <branch below>`, and after
     amending a lower branch, update the ones above with
     `git rebase --update-refs <base>` from the top branch.
 - Prepare the worktree: {SETUP}. If it prints settings such as ports, use
@@ -70,8 +72,8 @@ for a settled scope, with these overrides. Read `<WT>/AGENTS.md` and the
 Use the `apply-review-findings` skill with the findings and the patch path
 the orchestrator gives. Findings marked as dropped or held stay unapplied.
 If a finding marked to apply does not hold against the code, do not apply
-it, and say why in your reply. After amending, with `gh stack` run
-`gh stack sync` and `gh stack submit`; in a batch the orchestrator stacks,
+it, and say why in your reply. After amending, in a stack of your own run
+`.starling/bin/forge stack sync`; in a batch the orchestrator stacks,
 rebase the branches above with `--update-refs` and push each one.
 
 Reply with the new head commit of every pull request and the validation
