@@ -137,8 +137,9 @@ must not run.
   sourced or handed to an interpreter keeps its extension and has neither
   a `#!` line nor the executable bit: `fixture.sh`.
 - Starling's scripts use only POSIX `sh`, POSIX `awk` and git, so they run
-  in every container. A repository's own scripts may also use what every
-  environment of that repository has.
+  in every container, and reach the forge through `.starling/bin/forge`.
+  A repository's own scripts may also use what every environment of that
+  repository has.
 - No temporary files: keep data in variables and pipes, since sandboxes
   refuse writes to the system's temporary directory. Where a skill's prose
   needs a file, it uses `mktemp "${TMPDIR:-/tmp}/<name>.XXXXXX"`, because

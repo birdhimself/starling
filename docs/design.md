@@ -122,6 +122,9 @@ installer does not create it; a project adds it when it needs a setting.
 - Starling defines no scopes and suggests none. Scopes describe a project's
   structure, so only the project can name them.
 - Agents never add scopes to `.starling.conf` to make a commit pass.
+- `forge.kind` (`github` or `forgejo`) and `forge.url` (where a Forgejo's
+  API is, such as `https://git.example.org`): only where the origin remote
+  does not say; see Forges.
 
 ## Shared instructions: one import line
 
@@ -167,9 +170,37 @@ Considered and left to projects: reading an issue's whole comment thread,
 showing visual options rendered, reporting measured results, and rules for
 lean implementations.
 
+## Forges
+
+Starling works in repositories on GitHub and on Forgejo.
+
+- **One wrapper.** `.starling/bin/forge` is the only place that knows the
+  forge. Skills and scripts call its subcommands and name no forge's tool,
+  so no skill shows a command that does nothing in the repository it runs
+  in. The alternatives were skills that keep `gh` commands with a note on
+  what to run on Forgejo instead, and a command file per forge: both leave
+  the agent to translate, which a smaller model does worst.
+- **The forge comes from the origin remote.** `github.com` is GitHub, any
+  other host is Forgejo, and `forge.kind` in `.starling.conf` says
+  otherwise, for instance for a GitHub Enterprise host.
+- **GitHub through `gh`, Forgejo through its REST API** with `curl` and
+  `jq`. Forgejo's own command line tool, `fj`, prints no JSON, has no
+  command for a raw API call and cannot answer review threads; `tea` is
+  Gitea's, and the smaller tools have one maintainer each and no packages.
+  The API is versioned and documented, and `curl` and `jq` are easier to
+  have in a container than a build of a Rust or Go tool.
+- **The API's address** is the remote's host: with the remote's scheme and
+  port for `http` and `https`, with `https` and no port for `ssh`, whose
+  port is not the web server's. A path in front of the owner is kept, for
+  a Forgejo served below one. `forge.url` in `.starling.conf` overrides it.
+- **The token** is `FORGEJO_TOKEN`, else the password git's credential
+  helper holds for that host, so a clone that pushes over `https` needs no
+  second setup. It is handed to `curl` on standard input, never as an
+  argument, where a process list would show it.
 ## Scripts
 
-Scripts are POSIX `sh`, POSIX `awk` and git only. No Node, Python or
+Scripts are POSIX `sh`, POSIX `awk` and git only, except for what reaches
+the forge: `gh` on GitHub, `curl` and `jq` on Forgejo. No Node, Python or
 compiled binaries: agents run in dev containers that may have only Go or
 only Node, a binary would need one build per platform, and git needs `sh` to
 run hooks anyway, so `sh` exists wherever a hook runs.
