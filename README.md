@@ -47,6 +47,10 @@ machine: no global git hooks path, nothing on `PATH`, nothing in
 - `jq`, only to merge Starling's settings into an existing
   `.claude/settings.json`. Without it, the installer says what to merge.
 
+Forgejo support is experimental. It was tested against one Forgejo
+version, command by command, and no agent has yet taken an issue to a
+ready pull request there with the skills.
+
 ## Install
 
 In the repository:
