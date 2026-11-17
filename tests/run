@@ -218,7 +218,7 @@ expect "$tmp" "write-skill context: outside a repository" 2 "not inside a git wo
 forge="$root/.starling/bin/forge"
 fg=$tmp/forge
 git init -q -b main "$fg" || exit 2
-expect "$fg" "forge: no remote" 1 "there is no origin remote" "$forge" kind
+expect "$fg" "forge: no remote" 1 "the origin remote names no host" "$forge" kind
 git -C "$fg" remote add origin https://github.com/example/widgets.git || exit 2
 expect "$fg" "forge: GitHub over https" 0 "github" "$forge" kind
 git -C "$fg" remote set-url origin git@github.com:example/widgets.git
@@ -236,12 +236,31 @@ expect "$tmp" "forge: outside a repository" 1 "not inside a git work tree" "$for
 
 # On Forgejo, against a fake curl that records its arguments and its
 # standard input, and answers from the file FAKE_CURL names: the response's
-# body, then its status on a line of its own. jq is the real one.
+# body, then its status on its last line. jq is the real one.
 if command -v jq >/dev/null 2>&1; then
 	mkdir -p "$tmp/curlbin" && cat >"$tmp/curlbin/curl" <<'EOF'
 #!/bin/sh
+# What the wrapper asks about the repository itself is answered apart, so
+# that the recorded call is the one a test made.
+for last; do :; done
+case $last in
+*/api/v1/repos/example/widgets)
+	cat >/dev/null
+	printf '{"full_name": "example/widgets", "fork": false, "default_branch": "main"}\n200'
+	exit
+	;;
+esac
 printf '%s\n' "$@" >"$FAKE_CURL.args"
 cat >"$FAKE_CURL.stdin"
+# With a folder of answers, each call is answered by the file named after
+# its path below the repository, with _ for / and without the query.
+if [ -d "$FAKE_CURL.d" ]; then
+	name=${last#*/repos/example/widgets/}
+	name=$(printf '%s' "${name%%\?*}" | tr / _)
+	printf '%s %s\n' "$3" "$name" >>"$FAKE_CURL.calls"
+	if [ -f "$FAKE_CURL.d/$name" ]; then cat "$FAKE_CURL.d/$name"; else printf '{"message": "no answer for %s"}\n404' "$name"; fi
+	exit
+fi
 cat "$FAKE_CURL"
 EOF
 	chmod +x "$tmp/curlbin/curl"
@@ -282,8 +301,8 @@ $(cat "$tmp/curl-answer.args")"
 	forgejo api user
 	curl_got "an ssh remote means https without its port" "https://git.example.org/api/v1/user"
 	git -C "$fg" remote set-url origin http://localhost:3000/forge/example/widgets
-	forgejo api 'repos/{owner}/{repo}'
-	curl_got "a remote below a path" "http://localhost:3000/forge/api/v1/repos/example/widgets"
+	forgejo api 'repos/{owner}/{repo}/pulls'
+	curl_got "a remote below a path" "http://localhost:3000/forge/api/v1/repos/example/widgets/pulls"
 	printf '[forge]\n\turl = https://forge.example.org/\n' >"$fg/.starling.conf"
 	forgejo api user
 	curl_got "forge.url in .starling.conf" "https://forge.example.org/api/v1/user"
@@ -300,12 +319,189 @@ $(cat "$tmp/curl-answer.stdin" "$tmp/curl-answer.cred" 2>&1)"
 	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "no token for https://forge.example.org: set FORGEJO_TOKEN"; then ok; else
 		bad "forge: no token" "$out"
 	fi
+	unset token
 	rm "$fg/.starling.conf"
+
+	# Pull requests on Forgejo. #7 is a draft, #8 is ready and behind its
+	# base, #9 is merged.
+	git -C "$fg" config --unset-all credential.helper
+	git -C "$fg" remote set-url origin https://git.example.org/example/widgets.git
+	ans=$tmp/curl-answer.d
+	mkdir -p "$ans" || exit 2
+	pull() { # NUMBER TITLE DRAFT STATE MERGED BRANCH MERGE_BASE
+		printf '{"number": %s, "title": "%s", "draft": %s, "state": "%s", "merged": %s, "body": "Adds widgets.\\nCloses #3", "html_url": "https://git.example.org/example/widgets/pulls/%s", "head": {"ref": "%s", "sha": "%s0000"}, "base": {"ref": "main", "sha": "base0000"}, "merge_base": "%s"}' \
+			"$1" "$2" "$3" "$4" "$5" "$1" "$6" "$6" "$7"
+	}
+	{ pull 7 "WIP: Add widgets" true open false topic base0000 && printf '\n200'; } >"$ans/pulls_7"
+	{ pull 8 "Fix the lobby" false open false lobby old00000 && printf '\n200'; } >"$ans/pulls_8"
+	{ printf '[' && pull 7 "[wip] Add widgets" true open false topic base0000 && printf ',' &&
+		pull 8 "Fix the lobby" false open false lobby old00000 && printf ']\n200'; } >"$ans/pulls"
+	printf '[{"sha": "bbbbbbbbbbbb", "commit": {"message": "fixup! feat: add widgets"}}, {"sha": "aaaaaaaaaaaa", "commit": {"message": "feat: add widgets\\n\\nBody."}}]\n200' >"$ans/pulls_7_commits"
+	forgejo pr view 7
+	want='Number: 7
+URL: https://git.example.org/example/widgets/pulls/7
+State: open
+Draft: yes
+Title: Add widgets
+Head: topic
+Head commit: topic0000
+Base: main
+Behind base: no
+Commits:
+  aaaaaaaaa feat: add widgets
+  bbbbbbbbb fixup! feat: add widgets'
+	if [ "$out" = "$want" ]; then ok; else bad "forge: pr view on Forgejo" "$out"; fi
+	forgejo pr view 7 --body
+	if [ "$(printf '%s\n' "$out" | tail -n 3)" = 'Body:
+Adds widgets.
+Closes #3' ]; then ok; else bad "forge: pr view --body" "$out"; fi
+	cp "$ans/pulls_7_commits" "$ans/pulls_8_commits"
+	forgejo pr view 8
+	if printf '%s\n' "$out" | grep -qx 'Behind base: yes'; then ok; else bad "forge: a pull request behind its base" "$out"; fi
+	git -C "$fg" checkout -q -b topic 2>/dev/null
+	forgejo pr view
+	if printf '%s\n' "$out" | grep -qx 'Number: 7'; then ok; else bad "forge: pr view of the current branch" "$out"; fi
+	forgejo pr list
+	if [ "$out" = '#7 draft topic0000 https://git.example.org/example/widgets/pulls/7 Add widgets
+#8 ready lobby0000 https://git.example.org/example/widgets/pulls/8 Fix the lobby' ]; then ok; else
+		bad "forge: pr list on Forgejo" "$out"
+	fi
+	forgejo pr list --head lobby
+	if [ "$out" = '#8 ready lobby0000 https://git.example.org/example/widgets/pulls/8 Fix the lobby' ]; then ok; else
+		bad "forge: pr list --head" "$out"
+	fi
+	forgejo pr list --search 'closes #3' --head topic
+	if [ "$(printf '%s\n' "$out" | grep -c .)" = 1 ]; then ok; else bad "forge: pr list --search" "$out"; fi
+	{ printf '[' && pull 9 "Add a host" false closed true host base0000 && printf ',' &&
+		pull 10 "Drop it" false closed false drop base0000 && printf ']\n200'; } >"$ans/pulls"
+	forgejo pr list --state merged
+	if [ "$out" = '#9 merged host0000 https://git.example.org/example/widgets/pulls/9 Add a host' ]; then ok; else
+		bad "forge: pr list --state merged" "$out"
+	fi
+	curl_got "merged pull requests are among the closed" \
+		"https://git.example.org/api/v1/repos/example/widgets/pulls?state=closed&sort=recentupdate&limit=50&page=1"
+	sent() { # NAME WANT: the last call's body, as compact JSON, is WANT
+		got=$(grep '^{' "$tmp/curl-answer.args" | jq -c . 2>&1)
+		if [ "$got" = "$2" ]; then ok; else bad "forge: $1" "sent: $got"; fi
+	}
+	printf 'Adds widgets.\n' >"$tmp/pr-body"
+	printf '{"html_url": "https://git.example.org/example/widgets/pulls/11"}\n201' >"$ans/pulls"
+	forgejo pr create --draft --title "Add widgets" --body-file "$tmp/pr-body"
+	if [ "$out" = "https://git.example.org/example/widgets/pulls/11" ]; then ok; else bad "forge: pr create prints the URL" "$out"; fi
+	sent "pr create --draft on Forgejo" '{"title":"WIP: Add widgets","body":"Adds widgets.\n","head":"topic","base":"main"}'
+	forgejo pr create --base develop --head other --title "Add widgets" --body-file "$tmp/pr-body"
+	sent "pr create with a base and a head" '{"title":"Add widgets","body":"Adds widgets.\n","head":"other","base":"develop"}'
+	forgejo pr edit 7 --title "Add more widgets"
+	sent "pr edit keeps a draft a draft" '{"title":"WIP: Add more widgets"}'
+	forgejo pr edit 8 --title "Fix it" --body-file "$tmp/pr-body" --base develop
+	sent "pr edit of a ready pull request" '{"title":"Fix it","base":"develop","body":"Adds widgets.\n"}'
+	forgejo pr ready 7
+	sent "pr ready removes the prefix" '{"title":"Add widgets"}'
+	: >"$tmp/curl-answer.calls"
+	forgejo pr ready 8
+	if grep -q '^PATCH' "$tmp/curl-answer.calls"; then bad "forge: pr ready leaves a ready pull request" "$(cat "$tmp/curl-answer.calls")"; else ok; fi
+	status() { # ID CONTEXT STATUS
+		printf '{"id": %s, "context": "%s", "status": "%s", "target_url": "/example/widgets/actions/runs/%s/jobs/0"}' "$1" "$2" "$3" "$1"
+	}
+	{ printf '{"statuses": [' && status 31 build success && printf ',' && status 32 lint skipped && printf ']}\n200'; } >"$ans/commits_topic0000_status"
+	forgejo pr checks 7
+	if [ $? -eq 0 ] && [ "$out" = 'build	pass	https://git.example.org/example/widgets/actions/runs/31/jobs/0
+lint	skipped	https://git.example.org/example/widgets/actions/runs/32/jobs/0' ]; then ok; else
+		bad "forge: pr checks, green" "$out"
+	fi
+	forgejo runs topic0000
+	if [ "$out" = '31 completed
+32 completed' ]; then ok; else bad "forge: runs on Forgejo" "$out"; fi
+	{ printf '{"statuses": [' && status 31 build failure && printf ',' && status 33 lint pending && printf ']}\n200'; } >"$ans/commits_topic0000_status"
+	forgejo pr checks 7
+	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -q '^build	fail	' && printf '%s\n' "$out" | grep -q '^lint	pending	'; then ok; else
+		bad "forge: pr checks, red" "$out"
+	fi
+	forgejo runs topic0000
+	if [ "$out" = '31 completed
+33 pending' ]; then ok; else bad "forge: a pending run" "$out"; fi
+	printf '{"statuses": []}\n200' >"$ans/commits_topic0000_status"
+	forgejo pr checks 7
+	if [ $? -eq 1 ] && [ "$out" = "forge: no checks on #7" ]; then ok; else bad "forge: pr checks without checks" "$out"; fi
+	printf '{"number": 3, "title": "Lobby crashes", "state": "open", "user": {"login": "ada"}, "labels": [{"name": "bug"}, {"name": "lobby"}], "body": "It crashes."}\n200' >"$ans/issues_3"
+	printf '[{"user": {"login": "grace"}, "created_at": "2026-01-02T03:04:05Z", "body": "Confirmed."}]\n200' >"$ans/issues_3_comments"
+	forgejo issue view '#3'
+	want='title:	Lobby crashes
+state:	open
+author:	ada
+labels:	bug, lobby
+number:	3
+--
+It crashes.
+--
+author:	grace
+created:	2026-01-02T03:04:05Z
+--
+Confirmed.'
+	if [ "$out" = "$want" ]; then ok; else bad "forge: issue view on Forgejo" "$out"; fi
+	forgejo pr view seven
+	if [ $? -eq 2 ]; then ok; else bad "forge: a pull request that is no number" "$out"; fi
+	forgejo pr create --title "No body"
+	if [ $? -eq 2 ]; then ok; else bad "forge: pr create without a body" "$out"; fi
+
+	# A fork: issues and pull requests are the parent's, and a pull request
+	# comes from the fork's branch.
+	git -C "$fg" remote set-url origin https://git.example.org/bot/widgets.git
+	mkdir -p "$tmp/forkbin" && cat >"$tmp/forkbin/curl" <<'EOF'
+#!/bin/sh
+for last; do :; done
+cat >/dev/null
+case $last in
+*/repos/bot/widgets) printf '{"full_name": "bot/widgets", "fork": true, "owner": {"login": "bot"}, "parent": {"full_name": "example/widgets", "default_branch": "trunk"}}\n200' ;;
+*)
+	printf '%s\n' "$@" >"$FAKE_CURL.args"
+	printf '{"html_url": "https://git.example.org/example/widgets/pulls/12"}\n201'
+	;;
+esac
+EOF
+	chmod +x "$tmp/forkbin/curl"
+	out=$(cd "$fg" && PATH="$tmp/forkbin:$PATH" FAKE_CURL="$tmp/curl-answer" FORGEJO_TOKEN=s3cret &&
+		export PATH FAKE_CURL FORGEJO_TOKEN && run "$forge" pr create --title "Add widgets" --body-file "$tmp/pr-body" 2>&1)
+	curl_got "a fork's pull request goes to the parent" "https://git.example.org/api/v1/repos/example/widgets/pulls"
+	sent "a fork's pull request names its owner" '{"title":"Add widgets","body":"Adds widgets.\n","head":"bot:topic","base":"trunk"}'
+	git -C "$fg" checkout -q main 2>/dev/null
 fi
 
-# On GitHub, api hands over to gh.
+# On GitHub, the wrapper runs gh. A fake gh prints its arguments, one per
+# line, and the --jq filter is not run.
 mkdir -p "$tmp/ghapibin" && printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' >"$tmp/ghapibin/gh" && chmod +x "$tmp/ghapibin/gh"
 git -C "$fg" remote set-url origin https://github.com/example/widgets.git
+github() { # ARGS...: run forge in $fg with the fake gh, its arguments on one line
+	out=$(cd "$fg" && PATH="$tmp/ghapibin:$PATH" run "$forge" "$@" 2>&1 | tr '\n' ' ')
+}
+gh_ran() { # NAME WANT: the last call started with WANT
+	case $out in
+	"$2"*) ok ;;
+	*) bad "forge: $1" "$out" ;;
+	esac
+}
+github pr view 7
+gh_ran "pr view on GitHub" "pr view 7 --json number,url,state,isDraft,title,headRefName,headRefOid,baseRefName,mergeStateStatus,commits,body --jq "
+github pr list --state merged --head topic
+gh_ran "pr list on GitHub" "pr list --state merged --limit 50 --head topic --json "
+github pr list --search 12
+gh_ran "pr list --search on GitHub" "pr list --state open --limit 50 --search 12 in:title,body --json "
+: >"$fg/body.md"
+github pr create --draft --base develop --title "Add widgets" --body-file body.md
+gh_ran "pr create on GitHub" "pr create --draft --base develop --title Add widgets --body-file body.md "
+rm "$fg/body.md"
+github pr edit 7 --title "Add widgets"
+if [ -z "$out" ]; then ok; else bad "forge: pr edit on GitHub is silent" "$out"; fi
+github pr checkout 7
+gh_ran "pr checkout on GitHub" "pr checkout 7 "
+github runs abc123
+gh_ran "runs on GitHub" "run list --commit abc123 --limit 50 --json databaseId,status --jq "
+github issue view 12
+gh_ran "issue view on GitHub" "issue view 12 --json number,title,state,author,labels,body,comments --jq "
+github pr checks 7
+if printf '%s' "$out" | grep -q '^forge: no checks on #7'; then ok; else bad "forge: pr checks on GitHub without a list" "$out"; fi
+
+# On GitHub, api hands over to gh.
 out=$(cd "$fg" && PATH="$tmp/ghapibin:$PATH" run "$forge" api -X PATCH --input body.json 'repos/{owner}/{repo}/pulls/7' 2>&1)
 if [ "$out" = 'api
 -X

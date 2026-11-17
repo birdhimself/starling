@@ -2,19 +2,56 @@
 # Starling: one interface to the forge this repository is on.
 #
 #   forge kind
+#   forge pr view [PR] [--body]
+#   forge pr list [--head BRANCH] [--state open|merged|closed] [--search TEXT]
+#   forge pr create [--draft] [--base BRANCH] [--head BRANCH] --title TITLE --body-file FILE
+#   forge pr edit PR [--title TITLE] [--body-file FILE] [--base BRANCH]
+#   forge pr ready PR
+#   forge pr checks PR [--log-failed]
+#   forge pr checkout PR
+#   forge runs COMMIT
+#   forge issue view ISSUE
 #   forge api [-X METHOD] [--input FILE] PATH
 #
 # Skills and scripts call this instead of a forge's own tool, so that they
 # name no forge. GitHub is reached through gh, which must be signed in.
 # Forgejo is reached through its REST API with curl and jq.
 #
-# kind   prints github or forgejo: forge.kind in .starling.conf, else
-#        github when the origin remote's host is github.com, else forgejo.
-# api    calls the forge's own API and prints the response. PATH is the
-#        forge's, without its /api/v1 prefix on Forgejo; {owner} and {repo}
-#        stand for this repository. --input sends a file as the JSON body,
-#        - for standard input. The default method is GET, or POST with a
-#        body. For what no other subcommand covers.
+# kind         prints github or forgejo: forge.kind in .starling.conf, else
+#              github when the origin remote's host is github.com, else
+#              forgejo.
+# pr view      prints a pull request's facts, one "Key: value" per line:
+#              Number, URL, State (open, closed or merged), Draft (yes or
+#              no), Title, Head, Head commit, Base, Behind base (yes, no or
+#              unknown), then "Commits:" with one "  SHA subject" line each,
+#              oldest first. Without PR, the open one of the current branch.
+#              --body adds "Body:" and the description, last.
+# pr list      prints one "#NUMBER STATE COMMIT URL TITLE" line per pull
+#              request, newest first: STATE is draft, ready, merged or
+#              closed, COMMIT the head commit. Open ones by default. --search
+#              keeps those whose title or description contains TEXT.
+# pr create    opens a pull request from the current branch, or --head, onto
+#              the default branch, or --base, and prints its URL.
+# pr edit      changes the title, the description or the base branch.
+# pr ready     marks a draft as ready for review.
+# pr checks    prints one "NAME<TAB>STATE<TAB>URL" line per check on the head
+#              commit: STATE is pass, fail, pending or skipped. Exits 1
+#              unless every check passed or was skipped, also when there is
+#              none. --log-failed prints the logs of the failed ones instead.
+# pr checkout  switches to the pull request's head branch, fetching it.
+# runs         prints one "ID STATE" line per CI run on COMMIT: STATE is
+#              completed or pending.
+# issue view   prints an issue with every comment.
+# api          calls the forge's own API and prints the response. PATH is
+#              the forge's, without its /api/v1 prefix on Forgejo; {owner}
+#              and {repo} stand for this repository. --input sends a file as
+#              the JSON body, - for standard input. The default method is
+#              GET, or POST with a body. For what no other subcommand covers.
+#
+# A draft on Forgejo is a title that starts with "WIP:". The subcommands add
+# and remove the prefix, and titles are given and printed without it. When
+# the origin remote is a fork, issues and pull requests are its parent's,
+# and a pull request is opened from the fork's branch.
 #
 # On Forgejo, the API is at forge.url in .starling.conf, else at the origin
 # remote's host: the remote's own scheme and port for http and https, https
@@ -22,12 +59,12 @@
 # credential helper holds for that host.
 #
 # Exit status: 0, 1 when the forge cannot be told, cannot be reached or
-# refuses, 2 usage.
+# refuses, or when checks are not green, 2 usage.
 
 set -u
 
 usage() {
-	echo "usage: forge kind | api [-X METHOD] [--input FILE] PATH" >&2
+	sed -n '3,/^$/s/^# \{0,1\}//p' "$0" | sed -n '/^  forge /p' | sed '1s/^  /usage: /; 2,$s/^  /       /' >&2
 	exit 2
 }
 die() {
@@ -78,7 +115,7 @@ find_kind() {
 			;;
 		esac
 	elif [ -z "$remote" ]; then
-		die "there is no origin remote to tell the forge from; add it, or set forge.kind in .starling.conf"
+		die "the origin remote names no host to tell the forge from; set forge.kind in .starling.conf"
 	elif [ "${host%:*}" = github.com ]; then
 		kind=github
 	else
@@ -92,7 +129,7 @@ forgejo_setup() {
 	for tool in curl jq; do
 		command -v "$tool" >/dev/null 2>&1 || die "$tool is needed to reach Forgejo and is not installed"
 	done
-	[ -n "$remote" ] || die "there is no origin remote to find the repository from"
+	[ -n "$remote" ] || die "the origin remote names no host to find the repository at"
 	case $path in
 	*/*) ;;
 	*) die "cannot read an owner and a repository from the origin remote" ;;
@@ -154,6 +191,382 @@ forgejo_request() {
 	esac
 }
 
+# forgejo_target: the repository that issues and pull requests belong to,
+# which is the parent when the origin remote is a fork. head_owner is set
+# for a fork: a pull request's head is then "owner:branch".
+forgejo_target() {
+	[ -z "${target:-}" ] || return 0
+	forgejo_setup
+	about=$(forgejo_request GET "repos/$owner/$repo") || exit 1
+	target=$(printf '%s' "$about" | jq -r 'if .fork and .parent then .parent.full_name else .full_name end')
+	head_owner=$(printf '%s' "$about" | jq -r 'if .fork and .parent then .owner.login else "" end')
+	default_branch=$(printf '%s' "$about" | jq -r 'if .fork and .parent then .parent.default_branch else .default_branch end')
+}
+
+# forgejo_pages PATH: every page of a list, as one JSON array. PATH has a
+# query already. Stops after 20 pages of 50.
+forgejo_pages() {
+	page=1
+	while [ "$page" -le 20 ]; do
+		items=$(forgejo_request GET "$1&limit=50&page=$page") || return 1
+		printf '%s\n' "$items"
+		[ "$(printf '%s' "$items" | jq length)" -ge 50 ] || break
+		page=$((page + 1))
+	done | jq -s add
+}
+
+# A draft's title on Forgejo starts with one of these, in any case.
+wip='^(wip:|\[wip\])\s*'
+
+# number ARG: ARG as a pull request or issue number, with or without #.
+number() {
+	n=${1#\#}
+	case $n in
+	'' | *[!0-9]*) usage ;;
+	esac
+	printf '%s\n' "$n"
+}
+
+need_gh() {
+	command -v gh >/dev/null 2>&1 || die "gh is needed to reach GitHub and is not installed"
+}
+
+# forgejo_current_pr: the number of the open pull request of the current
+# branch.
+forgejo_current_pr() {
+	branch=$(git symbolic-ref -q --short HEAD) || die "no branch is checked out; name the pull request"
+	forgejo_target
+	found=$(forgejo_pages "repos/$target/pulls?state=open" |
+		jq -r --arg b "$branch" 'map(select(.head.ref == $b)) | .[0].number // empty') || exit 1
+	[ -n "$found" ] || die "no open pull request for the branch $branch"
+	printf '%s\n' "$found"
+}
+
+pr_view() {
+	pr=
+	body=
+	for arg in "$@"; do
+		case $arg in
+		--body) body=1 ;;
+		-*) usage ;;
+		*)
+			[ -z "$pr" ] || usage
+			pr=$(number "$arg") || exit 2
+			;;
+		esac
+	done
+	if [ "$kind" = github ]; then
+		need_gh
+		# shellcheck disable=SC2016
+		filter='"Number: \(.number)", "URL: \(.url)", "State: \(.state | ascii_downcase)",
+			"Draft: \(if .isDraft then "yes" else "no" end)", "Title: \(.title)",
+			"Head: \(.headRefName)", "Head commit: \(.headRefOid)", "Base: \(.baseRefName)",
+			"Behind base: \(if .mergeStateStatus == "BEHIND" then "yes" elif .mergeStateStatus == "UNKNOWN" then "unknown" else "no" end)",
+			"Commits:", (.commits[] | "  \(.oid[0:9]) \(.messageHeadline)")'
+		[ -z "$body" ] || filter="$filter, \"Body:\", .body"
+		# shellcheck disable=SC2086
+		gh pr view $pr --json number,url,state,isDraft,title,headRefName,headRefOid,baseRefName,mergeStateStatus,commits,body \
+			--jq "$filter" || exit 1
+		return
+	fi
+	forgejo_target
+	[ -n "$pr" ] || pr=$(forgejo_current_pr) || exit 1
+	data=$(forgejo_request GET "repos/$target/pulls/$pr") || exit 1
+	commits=$(forgejo_pages "repos/$target/pulls/$pr/commits?verification=false&files=false") || exit 1
+	printf '%s' "$data" | jq -r --arg wip "$wip" --argjson commits "$commits" --arg body "$body" '
+		"Number: \(.number)", "URL: \(.html_url)",
+		"State: \(if .merged then "merged" else .state end)",
+		"Draft: \(if .draft then "yes" else "no" end)", "Title: \(.title | sub($wip; ""; "i"))",
+		"Head: \(.head.ref)", "Head commit: \(.head.sha)", "Base: \(.base.ref)",
+		"Behind base: \(if .merged or .state != "open" then "unknown" elif .merge_base == .base.sha then "no" else "yes" end)",
+		"Commits:", ($commits | reverse[] | "  \(.sha[0:9]) \(.commit.message | split("\n")[0])"),
+		(if $body == "" then empty else "Body:", .body end)'
+}
+
+pr_list() {
+	head=
+	state=open
+	search=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--head | --state | --search)
+			[ $# -ge 2 ] || usage
+			case $1 in
+			--head) head=$2 ;;
+			--state) state=$2 ;;
+			--search) search=$2 ;;
+			esac
+			shift
+			;;
+		*) usage ;;
+		esac
+		shift
+	done
+	case $state in
+	open | merged | closed) ;;
+	*) usage ;;
+	esac
+	if [ "$kind" = github ]; then
+		need_gh
+		# shellcheck disable=SC2016
+		gh pr list --state "$state" --limit 50 ${head:+--head "$head"} ${search:+--search "$search in:title,body"} \
+			--json number,state,isDraft,headRefOid,url,title \
+			--jq '.[] | "#\(.number) \(if .state == "MERGED" then "merged" elif .state == "CLOSED" then "closed" elif .isDraft then "draft" else "ready" end) \(.headRefOid) \(.url) \(.title)"' ||
+			exit 1
+		return
+	fi
+	forgejo_target
+	api_state=closed
+	[ "$state" != open ] || api_state=open
+	forgejo_pages "repos/$target/pulls?state=$api_state&sort=recentupdate" |
+		jq -r --arg wip "$wip" --arg head "$head" --arg state "$state" --arg search "$search" '
+		.[]
+		| (if .merged then "merged" elif .state == "closed" then "closed" elif .draft then "draft" else "ready" end) as $s
+		| select($state == "open" or $s == $state)
+		| select($head == "" or .head.ref == $head)
+		| select($search == "" or ((.title + "\n" + (.body // "")) | ascii_downcase | contains($search | ascii_downcase)))
+		| "#\(.number) \($s) \(.head.sha) \(.html_url) \(.title | sub($wip; ""; "i"))"' || exit 1
+}
+
+# pr_fields "$@": read --title, --body-file, --base, --head and --draft into
+# variables of those names; anything else goes to rest.
+pr_fields() {
+	title=
+	body_file=
+	base_branch=
+	head=
+	draft=
+	rest=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--title | --body-file | --base | --head)
+			[ $# -ge 2 ] || usage
+			case $1 in
+			--title) title=$2 ;;
+			--body-file) body_file=$2 ;;
+			--base) base_branch=$2 ;;
+			--head) head=$2 ;;
+			esac
+			shift
+			;;
+		--draft) draft=1 ;;
+		-*) usage ;;
+		*)
+			[ -z "$rest" ] || usage
+			rest=$1
+			;;
+		esac
+		shift
+	done
+	[ -z "$body_file" ] || [ -r "$body_file" ] || die "cannot read $body_file"
+}
+
+pr_create() {
+	pr_fields "$@"
+	[ -z "$rest" ] && [ -n "$title" ] && [ -n "$body_file" ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		gh pr create ${draft:+--draft} ${base_branch:+--base "$base_branch"} ${head:+--head "$head"} \
+			--title "$title" --body-file "$body_file" || exit 1
+		return
+	fi
+	forgejo_target
+	[ -n "$head" ] || head=$(git symbolic-ref -q --short HEAD) || die "no branch is checked out; name it with --head"
+	[ -z "$draft" ] || title="WIP: $title"
+	payload=$(jq -cn --arg title "$title" --rawfile body "$body_file" \
+		--arg head "${head_owner:+$head_owner:}$head" --arg base "${base_branch:-$default_branch}" \
+		'{title: $title, body: $body, head: $head, base: $base}') || exit 1
+	forgejo_request POST "repos/$target/pulls" "$payload" | jq -r .html_url || exit 1
+}
+
+pr_edit() {
+	pr_fields "$@"
+	[ -n "$rest" ] && [ -z "$draft" ] && [ -z "$head" ] || usage
+	pr=$(number "$rest") || exit 2
+	[ -n "$title$body_file$base_branch" ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		gh pr edit "$pr" ${title:+--title "$title"} ${body_file:+--body-file "$body_file"} \
+			${base_branch:+--base "$base_branch"} >/dev/null || exit 1
+		return
+	fi
+	forgejo_target
+	if [ -n "$title" ]; then
+		# A draft stays one: keep the prefix its title has.
+		prefix=$(forgejo_request GET "repos/$target/pulls/$pr" |
+			jq -r --arg wip "$wip" '.title | (capture("(?<p>" + $wip + ")"; "i").p) // ""') || exit 1
+		title=$prefix$title
+	fi
+	payload=$(jq -cn --arg title "$title" --arg base "$base_branch" \
+		--rawfile body "${body_file:-/dev/null}" --arg has_body "$body_file" \
+		'(if $title != "" then {title: $title} else {} end)
+		+ (if $base != "" then {base: $base} else {} end)
+		+ (if $has_body != "" then {body: $body} else {} end)') || exit 1
+	forgejo_request PATCH "repos/$target/pulls/$pr" "$payload" >/dev/null || exit 1
+}
+
+pr_ready() {
+	[ $# -eq 1 ] || usage
+	pr=$(number "$1") || exit 2
+	if [ "$kind" = github ]; then
+		need_gh
+		gh pr ready "$pr" >/dev/null || exit 1
+		return
+	fi
+	forgejo_target
+	payload=$(forgejo_request GET "repos/$target/pulls/$pr" |
+		jq -c --arg wip "$wip" 'if .draft then {title: (.title | sub($wip; ""; "i"))} else empty end') || exit 1
+	[ -z "$payload" ] || forgejo_request PATCH "repos/$target/pulls/$pr" "$payload" >/dev/null || exit 1
+}
+
+# pr_head PR: the head commit of a pull request.
+pr_head() {
+	if [ "$kind" = github ]; then
+		gh pr view "$1" --json headRefOid --jq .headRefOid
+	else
+		forgejo_request GET "repos/$target/pulls/$1" | jq -r .head.sha
+	fi
+}
+
+pr_checks() {
+	pr=
+	logs=
+	for arg in "$@"; do
+		case $arg in
+		--log-failed) logs=1 ;;
+		-*) usage ;;
+		*)
+			[ -z "$pr" ] || usage
+			pr=$(number "$arg") || exit 2
+			;;
+		esac
+	done
+	[ -n "$pr" ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		if [ -n "$logs" ]; then
+			sha=$(pr_head "$pr") && [ -n "$sha" ] || exit 1
+			failed=$(gh run list --commit "$sha" --status failure --limit 50 --json databaseId --jq '.[].databaseId') || exit 1
+			[ -n "$failed" ] || die "no failed run on $sha"
+			for id in $failed; do
+				gh run view "$id" --log-failed || exit 1
+			done
+			return
+		fi
+		# gh exits non-zero for failed and for pending checks, with the list
+		# printed all the same, so only an empty list is its failure.
+		# shellcheck disable=SC2016
+		checks=$(gh pr checks "$pr" --json name,bucket,link \
+			--jq '.[] | [.name, (if .bucket == "skipping" then "skipped" elif .bucket == "cancel" then "fail" else .bucket end), .link] | @tsv' 2>&1)
+		case $checks in
+		*'	'*) ;;
+		*)
+			echo "forge: no checks on #$pr${checks:+: $checks}" >&2
+			exit 1
+			;;
+		esac
+	else
+		forgejo_target
+		sha=$(pr_head "$pr") && [ -n "$sha" ] || exit 1
+		statuses=$(forgejo_request GET "repos/$target/commits/$sha/status") || exit 1
+		if [ -n "$logs" ]; then
+			failed=$(printf '%s' "$statuses" | jq -r '.statuses // [] | .[]
+				| select(.status != "success" and .status != "pending" and .status != "skipped")
+				| "\(.target_url // "")\t\(.context)"')
+			[ -n "$failed" ] || die "no failed check on $sha"
+			tab=$(printf '\t')
+			printf '%s\n' "$failed" | while IFS=$tab read -r url context; do
+				echo "== $context"
+				case $url in
+				/*/actions/runs/*/jobs/*) forgejo_job_log "$url" || echo "forge: cannot read the log; see $base$url" >&2 ;;
+				/*) echo "see $base$url" ;;
+				*) echo "see ${url:-the forge}" ;;
+				esac
+			done
+			return
+		fi
+		checks=$(printf '%s' "$statuses" | jq -r --arg base "$base" '.statuses // [] | .[]
+			| [.context,
+				(if .status == "success" then "pass" elif .status == "pending" or .status == "skipped" then .status else "fail" end),
+				((.target_url // "") | if startswith("/") then $base + . else . end)]
+			| @tsv')
+		[ -n "$checks" ] || die "no checks on #$pr"
+	fi
+	printf '%s\n' "$checks"
+	! printf '%s\n' "$checks" | awk -F '\t' '$2 != "pass" && $2 != "skipped" { found = 1 } END { exit !found }'
+}
+
+# forgejo_job_log PATH: the log of an Actions job, by its path on the web.
+# Forgejo's API has no logs, and the web serves each attempt's: print the
+# last one that exists.
+forgejo_job_log() {
+	attempt=1
+	log=
+	while next=$(printf 'header = "Authorization: token %s"\n' "$token" |
+		curl -sS -f -K - "$base$1/attempt/$attempt/logs" 2>/dev/null); do
+		log=$next
+		attempt=$((attempt + 1))
+	done
+	[ -n "$log" ] && printf '%s\n' "$log"
+}
+
+pr_checkout() {
+	[ $# -eq 1 ] || usage
+	pr=$(number "$1") || exit 2
+	if [ "$kind" = github ]; then
+		need_gh
+		gh pr checkout "$pr" || exit 1
+		return
+	fi
+	forgejo_target
+	branch=$(forgejo_request GET "repos/$target/pulls/$pr" | jq -r .head.ref) && [ -n "$branch" ] || exit 1
+	if git fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null; then
+		git switch -q "$branch" 2>/dev/null || git switch -q -c "$branch" --track "origin/$branch" || exit 1
+		git merge -q --ff-only "origin/$branch" || die "$branch has commits that origin/$branch lacks"
+	else
+		# The head is in another repository: the forge keeps it under pull/.
+		git fetch -q origin "pull/$pr/head" && git switch -q -C "$branch" FETCH_HEAD || exit 1
+	fi
+}
+
+runs() {
+	[ $# -eq 1 ] || usage
+	if [ "$kind" = github ]; then
+		need_gh
+		gh run list --commit "$1" --limit 50 --json databaseId,status \
+			--jq '.[] | "\(.databaseId) \(if .status == "completed" then "completed" else "pending" end)"' || exit 1
+		return
+	fi
+	# Forgejo knows a commit's CI by its statuses, which other CI systems
+	# set too. Each run of a check writes a status with a new id.
+	forgejo_target
+	forgejo_request GET "repos/$target/commits/$1/status" |
+		jq -r '.statuses // [] | .[] | "\(.id) \(if .status == "pending" then "pending" else "completed" end)"' || exit 1
+}
+
+issue_view() {
+	[ $# -eq 1 ] || usage
+	issue=$(number "$1") || exit 2
+	if [ "$kind" = github ]; then
+		need_gh
+		# Without a terminal, gh issue view --comments leaves out the issue
+		# itself, so both come from its JSON.
+		# shellcheck disable=SC2016
+		gh issue view "$issue" --json number,title,state,author,labels,body,comments --jq '
+			"title:\t\(.title)", "state:\t\(.state | ascii_downcase)", "author:\t\(.author.login)",
+			"labels:\t\([.labels[].name] | join(", "))", "number:\t\(.number)", "--", .body,
+			(.comments[] | "--", "author:\t\(.author.login)", "created:\t\(.createdAt)", "--", .body)' || exit 1
+		return
+	fi
+	forgejo_target
+	data=$(forgejo_request GET "repos/$target/issues/$issue") || exit 1
+	comments=$(forgejo_pages "repos/$target/issues/$issue/comments?sort=oldest") || exit 1
+	printf '%s' "$data" | jq -r --argjson comments "$comments" '
+		"title:\t\(.title)", "state:\t\(.state)", "author:\t\(.user.login)",
+		"labels:\t\([.labels[].name] | join(", "))", "number:\t\(.number)", "--", .body,
+		($comments[] | "--", "author:\t\(.user.login)", "created:\t\(.created_at)", "--", .body)'
+}
+
 [ $# -ge 1 ] || usage
 command=$1
 shift
@@ -164,10 +577,40 @@ kind)
 	find_kind
 	echo "$kind"
 	;;
+pr)
+	[ $# -ge 1 ] || usage
+	sub=$1
+	shift
+	find_kind
+	case $sub in
+	view) pr_view "$@" ;;
+	list) pr_list "$@" ;;
+	create) pr_create "$@" ;;
+	edit) pr_edit "$@" ;;
+	ready) pr_ready "$@" ;;
+	checks) pr_checks "$@" ;;
+	checkout) pr_checkout "$@" ;;
+	*) usage ;;
+	esac
+	;;
+runs)
+	find_kind
+	runs "$@"
+	;;
+issue)
+	[ $# -ge 1 ] || usage
+	sub=$1
+	shift
+	find_kind
+	case $sub in
+	view) issue_view "$@" ;;
+	*) usage ;;
+	esac
+	;;
 api)
 	method=
 	input=
-	target=
+	api_path=
 	while [ $# -gt 0 ]; do
 		case $1 in
 		-X)
@@ -182,17 +625,17 @@ api)
 			;;
 		-*) usage ;;
 		*)
-			[ -z "$target" ] || usage
-			target=$1
+			[ -z "$api_path" ] || usage
+			api_path=$1
 			;;
 		esac
 		shift
 	done
-	[ -n "$target" ] || usage
+	[ -n "$api_path" ] || usage
 	find_kind
 	if [ "$kind" = github ]; then
-		command -v gh >/dev/null 2>&1 || die "gh is needed to reach GitHub and is not installed"
-		exec gh api ${method:+-X "$method"} ${input:+--input "$input"} "$target"
+		need_gh
+		exec gh api ${method:+-X "$method"} ${input:+--input "$input"} "$api_path"
 	fi
 	body=
 	if [ -n "$input" ]; then
@@ -200,7 +643,15 @@ api)
 		[ -n "$body" ] || die "$input is empty"
 	fi
 	[ -n "$method" ] || method=${body:+POST}
-	forgejo_request "${method:-GET}" "$target" "$body" || exit 1
+	# {owner} and {repo} are the repository issues and pull requests are in.
+	case $api_path in
+	*'{owner}'* | *'{repo}'*)
+		forgejo_target
+		owner=${target%/*}
+		repo=${target#*/}
+		;;
+	esac
+	forgejo_request "${method:-GET}" "$api_path" "$body" || exit 1
 	;;
 *) usage ;;
 esac

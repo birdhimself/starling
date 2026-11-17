@@ -201,6 +201,28 @@ Starling works in repositories on GitHub and on Forgejo.
   helper holds for that host, so a clone that pushes over `https` needs no
   second setup. It is handed to `curl` on standard input, never as an
   argument, where a process list would show it.
+- **Subcommands print the same on both forges.** `pr view` prints
+  `Key: value` lines, `pr list` and `pr checks` one line per item, so that
+  a script reads them with `sed` and `awk` and a skill describes them
+  once. A description is printed only on request and last, so that no line
+  of it can pass for one of the facts above it.
+- **Drafts.** On Forgejo a draft is a title that starts with `WIP:` or
+  `[WIP]`. The wrapper adds the prefix for `pr create --draft`, keeps it
+  when a draft's title is edited, removes it for `pr ready`, and prints
+  titles without it, so skills never see it.
+- **Forks.** When the origin remote is a fork, issues and pull requests
+  are its parent's, and `pr create` opens the pull request there from
+  `owner:branch`, which is how an account without write access
+  contributes. `gh` resolves the same on GitHub.
+- **CI on Forgejo is read from commit statuses,** not from Actions runs:
+  other CI systems report there too, and each run of a check writes a
+  status with a new id, which is what `finish-pr`'s `wait-ci` needs to
+  see the run that marking a pull request ready starts. Forgejo's API
+  has no job logs, so `pr checks --log-failed` reads them from the web
+  route of the job a failed status links to.
+- **Scripts find the wrapper next to themselves,** and `STARLING_FORGE`
+  names another one, which is how the tests put a fake in its place. The
+  wrapper itself is tested against a fake `curl` and a fake `gh`.
 - **Workflows per forge.** `.starling/workflows/github/` goes to
   `.github/workflows/` and `.starling/workflows/forgejo/` to
   `.forgejo/workflows/`. Forgejo Actions would also run a file in
@@ -510,3 +532,12 @@ Checked on 2026-11-17 with Forgejo 15.0.11 and Forgejo Runner 12.13.2.
   name even where `name:` is an expression.
 - Removing `WIP:` from the title sends `pull_request` with the type
   `edited`, and no `ready_for_review`.
+- The run that an `edited` event starts writes a commit status with a new
+  id under the same context.
+- A pull request opened from a fork with the head `owner:branch` ran the
+  base repository's workflow, and its status is on the head commit in the
+  base repository.
+- `<job's web path>/attempt/<n>/logs` serves a job's log to a request with
+  an API token.
+- `gh issue view --comments` prints only the comments, not the issue,
+  when its output is not a terminal.
