@@ -26,6 +26,8 @@ tests, commit messages, pull requests or issues. Use neutral examples.
   `references/rules.md` holds the rules for skills, and the lint of the
   `test-skill` skill checks the mechanical ones, also in `sh tests/run`.
 - Scripts use only POSIX `sh`, POSIX `awk` and git, and no temporary files.
+  Only `.starling/bin/forge` knows the forge and its tools; everything else
+  calls it.
 - Run the tests with `sh tests/run`.
 
 ## Releases

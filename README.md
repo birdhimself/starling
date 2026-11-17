@@ -37,6 +37,9 @@ machine: no global git hooks path, nothing on `PATH`, nothing in
 - git, POSIX `sh` and POSIX `awk`, for every script and hook.
 - `gh`, signed in, for the skills that work with GitHub. Joining pull
   requests into a stack also needs the `gh stack` extension.
+- On Forgejo, `curl` and `jq` in place of `gh`, and a token: in
+  `FORGEJO_TOKEN`, or as the password git's credential helper holds for the
+  host.
 - `jq`, only to merge Starling's settings into an existing
   `.claude/settings.json`. Without it, the installer says what to merge.
 
@@ -134,6 +137,7 @@ do not touch it.
 | To                             | Use                                                                                     |
 | ------------------------------ | --------------------------------------------------------------------------------------- |
 | Allow commit scopes            | `.starling.conf`, below.                                                                |
+| Name the forge                 | `.starling.conf`, below. Only where the origin remote does not say.                     |
 | Refine the shared rules        | The project's own `AGENTS.md`.                                                          |
 | Add a git hook                 | `.githooks/<name>`, which Starling's hooks run after their own checks.                  |
 | Adapt one of Starling's skills | `.agents/policy/<skill>.md`, which that skill reads.                                    |
@@ -153,6 +157,16 @@ and `adopt-starling` proposes whether to replace or rename it.
 Without `scopes`, commit headers take no scope. `requireScope = true` makes
 every header name one, which only suits a project whose scopes cover every
 file.
+
+Starling tells the forge from the origin remote: `github.com` is GitHub,
+any other host is Forgejo. Where that is wrong, or Forgejo's API is not at
+the remote's host, say so:
+
+```ini
+[forge]
+	kind = forgejo
+	url = https://git.example.org
+```
 
 ## Skills
 

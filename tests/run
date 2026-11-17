@@ -213,6 +213,107 @@ if [ "$(printf '%s\n' "$out" | tail -n 1)" = "  none" ]; then ok; else
 fi
 expect "$tmp" "write-skill context: outside a repository" 2 "not inside a git work tree" "$wcontext"
 
+# The forge wrapper. The forge comes from .starling.conf, else from the
+# origin remote's host.
+forge="$root/.starling/bin/forge"
+fg=$tmp/forge
+git init -q -b main "$fg" || exit 2
+expect "$fg" "forge: no remote" 1 "there is no origin remote" "$forge" kind
+git -C "$fg" remote add origin https://github.com/example/widgets.git || exit 2
+expect "$fg" "forge: GitHub over https" 0 "github" "$forge" kind
+git -C "$fg" remote set-url origin git@github.com:example/widgets.git
+expect "$fg" "forge: GitHub over ssh" 0 "github" "$forge" kind
+git -C "$fg" remote set-url origin https://git.example.org/example/widgets.git
+expect "$fg" "forge: another host is Forgejo" 0 "forgejo" "$forge" kind
+printf '[forge]\n\tkind = github\n' >"$fg/.starling.conf"
+expect "$fg" "forge: kind from .starling.conf" 0 "github" "$forge" kind
+printf '[forge]\n\tkind = gitlab\n' >"$fg/.starling.conf"
+expect "$fg" "forge: an unknown kind" 2 "must be github or forgejo" "$forge" kind
+rm "$fg/.starling.conf"
+expect "$fg" "forge: usage" 2 "usage: forge" "$forge" nope
+expect "$fg" "forge: api without a path" 2 "usage: forge" "$forge" api
+expect "$tmp" "forge: outside a repository" 1 "not inside a git work tree" "$forge" kind
+
+# On Forgejo, against a fake curl that records its arguments and its
+# standard input, and answers from the file FAKE_CURL names: the response's
+# body, then its status on a line of its own. jq is the real one.
+if command -v jq >/dev/null 2>&1; then
+	mkdir -p "$tmp/curlbin" && cat >"$tmp/curlbin/curl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" >"$FAKE_CURL.args"
+cat >"$FAKE_CURL.stdin"
+cat "$FAKE_CURL"
+EOF
+	chmod +x "$tmp/curlbin/curl"
+	forgejo() { # ARGS...: run forge in $fg with the fake curl
+		out=$(cd "$fg" && PATH="$tmp/curlbin:$PATH" FAKE_CURL="$tmp/curl-answer" FORGEJO_TOKEN=${token-s3cret} &&
+			export PATH FAKE_CURL FORGEJO_TOKEN && run "$forge" "$@" 2>&1)
+	}
+	curl_got() { # NAME WANT: the last call's arguments have the line WANT
+		if grep -qxF -- "$2" "$tmp/curl-answer.args"; then ok; else
+			bad "forge: $1" "expected the argument \"$2\" in:
+$(cat "$tmp/curl-answer.args")"
+		fi
+	}
+	printf '{"login": "bot"}\n200' >"$tmp/curl-answer"
+	forgejo api user
+	if [ $? -eq 0 ] && [ "$out" = '{"login": "bot"}' ]; then ok; else bad "forge: api prints the response" "$out"; fi
+	curl_got "api at the remote's host" "https://git.example.org/api/v1/user"
+	curl_got "api defaults to GET" "GET"
+	if grep -qx 'header = "Authorization: token s3cret"' "$tmp/curl-answer.stdin" &&
+		! grep -q s3cret "$tmp/curl-answer.args"; then ok; else
+		bad "forge: the token goes to curl on standard input" "$(cat "$tmp/curl-answer.args" "$tmp/curl-answer.stdin")"
+	fi
+	forgejo api '/repos/{owner}/{repo}/pulls/7'
+	curl_got "api fills in the repository" "https://git.example.org/api/v1/repos/example/widgets/pulls/7"
+	echo '{"title": "Add widgets"}' >"$tmp/curl-body"
+	forgejo api --input "$tmp/curl-body" 'repos/{owner}/{repo}/pulls'
+	curl_got "api sends a body" '{"title": "Add widgets"}'
+	curl_got "api posts a body" "POST"
+	forgejo api -X PATCH --input "$tmp/curl-body" 'repos/{owner}/{repo}/pulls/7'
+	curl_got "api with a method" "PATCH"
+	printf '{"message": "The target could not be found."}\n404' >"$tmp/curl-answer"
+	forgejo api repos/example/none
+	if [ $? -eq 1 ] && [ "$out" = "forge: GET repos/example/none: HTTP 404: The target could not be found." ]; then ok; else
+		bad "forge: api reports a refusal" "$out"
+	fi
+	printf '{}\n200' >"$tmp/curl-answer"
+	git -C "$fg" remote set-url origin ssh://git@git.example.org:2222/example/widgets.git
+	forgejo api user
+	curl_got "an ssh remote means https without its port" "https://git.example.org/api/v1/user"
+	git -C "$fg" remote set-url origin http://localhost:3000/forge/example/widgets
+	forgejo api 'repos/{owner}/{repo}'
+	curl_got "a remote below a path" "http://localhost:3000/forge/api/v1/repos/example/widgets"
+	printf '[forge]\n\turl = https://forge.example.org/\n' >"$fg/.starling.conf"
+	forgejo api user
+	curl_got "forge.url in .starling.conf" "https://forge.example.org/api/v1/user"
+	git -C "$fg" config credential.helper \
+		'!f() { test "$1" = get && cat >"$FAKE_CURL.cred" && echo username=bot && echo password=fr0mgit; }; f'
+	token='' forgejo api user
+	if grep -qx 'header = "Authorization: token fr0mgit"' "$tmp/curl-answer.stdin" &&
+		grep -qx 'host=forge.example.org' "$tmp/curl-answer.cred"; then ok; else
+		bad "forge: the token from git's credential helper" "$out
+$(cat "$tmp/curl-answer.stdin" "$tmp/curl-answer.cred" 2>&1)"
+	fi
+	git -C "$fg" config credential.helper ''
+	token='' forgejo api user
+	if [ $? -eq 1 ] && printf '%s\n' "$out" | grep -qF "no token for https://forge.example.org: set FORGEJO_TOKEN"; then ok; else
+		bad "forge: no token" "$out"
+	fi
+	rm "$fg/.starling.conf"
+fi
+
+# On GitHub, api hands over to gh.
+mkdir -p "$tmp/ghapibin" && printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' >"$tmp/ghapibin/gh" && chmod +x "$tmp/ghapibin/gh"
+git -C "$fg" remote set-url origin https://github.com/example/widgets.git
+out=$(cd "$fg" && PATH="$tmp/ghapibin:$PATH" run "$forge" api -X PATCH --input body.json 'repos/{owner}/{repo}/pulls/7' 2>&1)
+if [ "$out" = 'api
+-X
+PATCH
+--input
+body.json
+repos/{owner}/{repo}/pulls/7' ]; then ok; else bad "forge: api on GitHub runs gh api" "$out"; fi
+
 # triage-issue's relations script, against a fake gh that answers by path.
 relations="$root/.starling/skills/triage-issue/scripts/relations"
 mkdir -p "$tmp/fakebin" && cat >"$tmp/fakebin/gh" <<'EOF'
