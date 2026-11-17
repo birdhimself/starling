@@ -42,10 +42,11 @@ Claude Code: Codex and others read the same files.
 ├── hooks/                       # git hooks: commit-msg, ...
 ├── skills/<name>/               # shared skills
 ├── claude-settings.json         # merged into .claude/settings.json
-└── workflows/                   # copied into .github/workflows/
+└── workflows/<forge>/           # copied to where the forge reads them
 .claude/skills/<name>  -> ../../.starling/skills/<name>   # for Claude Code
 .agents/skills/<name>  -> ../../.starling/skills/<name>   # for Codex
-.github/workflows/starling-commits.yml                    # CI commit check
+.github/workflows/starling-commits.yml                    # CI commit check,
+                                 # on Forgejo in .forgejo/workflows/
 .starling.conf                   # optional, owned by the project
 AGENTS.md                        # owned by the project, plus one import line
 ```
@@ -72,8 +73,10 @@ including its own skills and `.starling.conf`.
   sets up what Starling owns outside it: the import line (once, after the
   first heading; a lone `CLAUDE.md` is renamed to `AGENTS.md`), skill links
   (pruned when a skill is gone; a project's own entry of the same name is
-  left alone and reported), `starling-*.yml` workflows (with the default
-  branch from `origin/HEAD`; pruned when gone), `.claude/settings.json`
+  left alone and reported), `starling-*.yml` workflows (those of the
+  repository's forge, see Forges, with the default branch from
+  `origin/HEAD`; pruned when gone or installed for the other forge),
+  `.claude/settings.json`
   (created, or merged with `jq`: Starling's attribution keys, without the
   empty `commit` and `pr` of earlier versions, and hook
   commands under `.starling/bin/` replaced; without `jq`, a note), and the
@@ -87,9 +90,10 @@ including its own skills and `.starling.conf`.
   Prettier-clean with default options anyway; Starling's CI checks it with a
   pinned Prettier. For Renovate it prints a `packageRules` entry
   (`matchFileNames` for `.starling/**` and
-  `.github/workflows/starling-*.yml`, `enabled: false`) until the config
-  mentions `.github/workflows/starling-`; `sh` and `awk` cannot edit JSON5
-  safely, so it does not add the entry itself.
+  `.github/workflows/starling-*.yml`, `enabled: false`; on Forgejo the
+  workflows' path there) until the config mentions that workflow path;
+  `sh` and `awk` cannot edit JSON5 safely, so it does not add the entry
+  itself.
 - The summary ends with a hint at the `adopt-starling` skill, by the path
   of its file, when a first install finds agent instructions or skills of
   the project's own, and when an update brought skills, which it names.
@@ -197,6 +201,13 @@ Starling works in repositories on GitHub and on Forgejo.
   helper holds for that host, so a clone that pushes over `https` needs no
   second setup. It is handed to `curl` on standard input, never as an
   argument, where a process list would show it.
+- **Workflows per forge.** `.starling/workflows/github/` goes to
+  `.github/workflows/` and `.starling/workflows/forgejo/` to
+  `.forgejo/workflows/`. Forgejo Actions would also run a file in
+  `.github/workflows/`, but the commit check must differ there; see
+  Enforcement. Without an origin remote the installer cannot tell the
+  forge, installs GitHub's workflows and says so.
+
 ## Scripts
 
 Scripts are POSIX `sh`, POSIX `awk` and git only, except for what reaches
@@ -297,9 +308,9 @@ Rules that must hold are enforced; instructions explain them.
   cannot read is allowed; it is a guard, not the enforcement. Not caught:
   git aliases, `sh -c`, `xargs`. Fixture commands in
   `tests/deny-hook-bypass/` pin the behavior.
-- The CI workflow (`.starling/workflows/starling-commits.yml`, installed as
-  `.github/workflows/starling-commits.yml`; Starling's own copy is
-  identical, which a test checks) runs the checker vendored in the same
+- The CI workflow (`.starling/workflows/github/starling-commits.yml`,
+  installed as `.github/workflows/starling-commits.yml`; Starling's own copy
+  is identical, which a test checks) runs the checker vendored in the same
   repository, so CI and the local hook always run the same version. No setup
   step: git and `sh` are on the runner.
   - Drafts skip the check under a different name: a skipped check counts as
@@ -323,6 +334,15 @@ Rules that must hold are enforced; instructions explain them.
     gate must not.
   - The template names `main`; the installer puts in the repository's
     default branch when it differs.
+  - On Forgejo (`.starling/workflows/forgejo/starling-commits.yml`) the job
+    never skips. Forgejo reports a skipped job as a successful check under
+    the job's plain name, without evaluating a `name:` expression, so a
+    draft's skipped check would stand in for the real one. A draft there is
+    a title that starts with `WIP:`, and marking it ready is an edit of the
+    title, with no event of its own. So the workflow also runs on `edited`,
+    and checks a draft without `--reject-fixups` and a ready pull request
+    with it: the run that the title's edit starts is the one that gates the
+    merge. Forgejo refuses to merge a draft by itself.
 - The checker replaces commitlint. commitlint's parser reads body lines such
   as `Note: ...` as the start of the footer and then reports misleading
   errors; the checker uses git's own trailer parsing instead.
@@ -477,3 +497,16 @@ Checked on 2026-11-07 and 2026-11-08 with Claude Code 2.1.319, Codex
   a 1Password agent: the sandbox cannot reach its socket.
 - The eval runner's sandbox on macOS cannot run Apple's `/usr/bin/git`
   without another git on `PATH`, such as Homebrew's.
+
+Checked on 2026-11-17 with Forgejo 15.0.11 and Forgejo Runner 12.13.2.
+
+- Forgejo Actions runs a workflow from `.github/workflows/` when the
+  repository has no `.forgejo/workflows/`, and resolves
+  `actions/checkout` pinned to a commit.
+- A pull request whose title starts with `WIP:` has `draft: true` in the
+  API and in `github.event.pull_request.draft`.
+- A skipped job sets a successful commit status, "Has been skipped", under
+  the context `<workflow> / <job name> (<event>)`, with the job's plain
+  name even where `name:` is an expression.
+- Removing `WIP:` from the title sends `pull_request` with the type
+  `edited`, and no `ready_for_review`.
