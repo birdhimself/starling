@@ -1,6 +1,6 @@
 ---
 name: write-skill
-description: Creates, changes, renames or splits a skill by Starling's rules for skills, with one purpose, a contract, a verb-object name and a description that says when to use it and when not. It places and links the skill for Claude Code and Codex, writes its eval cases, and tests it with test-skill until the lint passes. Use when asked to create, write, add, change, rename or split a skill, or to turn a repeated workflow into a skill. Do not use for checking a skill without changing it (use `test-skill`), or for editing AGENTS.md or other agent instructions.
+description: Creates, changes, renames or splits a skill by Starling's rules for skills, with one purpose, a contract, a verb-object name and a description that says when to use it and when not. It places and links the skill for Claude Code and Codex, writes its eval cases, and tests it with test-skill until the lint passes. Use when asked to create, write, add, change, rename or split a skill, a one-line change to its description or wording included, or to turn a repeated workflow into a skill. Do not use for checking a skill without changing it (use `test-skill`), or for editing AGENTS.md or other agent instructions.
 argument-hint: "<what the skill should do, or the skill to change>"
 ---
 
@@ -63,6 +63,15 @@ eval setup, ask in the same round whether to set one up.
 
 ## 3. Write
 
+Write the skill where the context says new skills go: in Starling
+`.starling/skills/<name>/`, in a project `.agents/skills/<name>/`. A
+skill you change that is still a real directory in `.claude/skills/` is
+copied there first, with
+`mkdir -p .agents/skills && cp -R .claude/skills/<name> .agents/skills/`,
+and changed in the copy. Leave the old directory in place until "Link":
+the test needs neither the link nor the old directory gone, and checks
+the copy, not the old directory.
+
 - `SKILL.md`: the frontmatter, a title, one paragraph on what the skill
   does, `## Contract`, numbered steps, a report section, and stop
   conditions where it must stop and ask. Under 500 lines.
@@ -74,29 +83,11 @@ eval setup, ask in the same round whether to set one up.
 When changing a skill, keep what still holds, and update every caller
 that names it. When splitting one, give each part one purpose and its own
 trigger; what remains of the old skill becomes a meta skill that holds the
-order and the hand-offs, or goes. When renaming, move the directory, its
-links and its eval cases, change the cases' tags, and update every
-mention.
+order and the hand-offs, or goes. When renaming, move the directory and
+its eval cases, change the cases' tags, and update every mention; the
+links change in "Link".
 
-## 4. Place and link
-
-Where the context says new skills go:
-
-- **Starling:** `.starling/skills/<name>/`, then
-  `ln -s ../../.starling/skills/<name> .claude/skills/<name>` and the
-  same for `.agents/skills/<name>`.
-- **A project:** `.agents/skills/<name>/`, then
-  `mkdir -p .claude/skills && ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
-  A skill you change that is still a real directory in `.claude/skills/`
-  moves first, with
-  `mkdir -p .agents/skills && git mv .claude/skills/<name> .agents/skills/<name>`,
-  then gets the link.
-
-Sandboxes often refuse writes in `.claude/`. Then give the user the
-`ln -s` command to run, and say in the report that Claude Code does not
-load the skill until the link exists.
-
-## 5. Eval cases
+## 4. Eval cases
 
 Follow `.starling/skills/write-skill/references/evals.md`.
 
@@ -105,11 +96,15 @@ Follow `.starling/skills/write-skill/references/evals.md`.
   and the verb's contract as graders.
 - Without one, set it up as that file describes if the user agreed, then
   write the cases. Otherwise write nothing for the evals, and list in the
-  report each case you would write: its prompt and what it grades.
+  report each case you would write: its prompt and what it grades. A user
+  who declined evals, or asked for none, still gets this list: it is what
+  they would add once they set evals up.
 
-## 6. Test
+## 5. Test
 
-Use the `test-skill` skill on the skill, telling it not to run the evals.
+Use the `test-skill` skill on the skill's directory, telling it not to
+run the evals and that an old copy still in `.claude/skills/` is removed
+in a later step.
 Fix every finding it reports and use it again, at most three rounds.
 Report what is left after the third.
 
@@ -118,12 +113,34 @@ changed, and let it ask the user whether to run their eval cases. When
 any description changed, include every skill's must-not-run cases:
 descriptions compete.
 
+## 6. Link
+
+Link the skill last, never before "Test" has run: sandboxes often
+refuse writes in `.claude/`, and nothing before this step needs the
+link. Keep a link that already points
+at the skill. After a rename, first remove the old name's links:
+`rm .claude/skills/<old>`, and in Starling `rm .agents/skills/<old>`.
+
+- **Starling:**
+  `ln -s ../../.starling/skills/<name> .claude/skills/<name>` and the
+  same for `.agents/skills/<name>`.
+- **A project:** for a skill you copied out of `.claude/skills/`, first
+  `rm -r .claude/skills/<name>`: `ln -s` onto an existing directory puts
+  the link inside it. Then
+  `mkdir -p .claude/skills && ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
+
+When a command here is refused, give the user the commands to run, and
+say in the report that until they run, Claude Code does not load the
+skill as written: it loads no skill, or the old copy still in
+`.claude/skills/`.
+
 ## 7. Report
 
 - The skill's files, created or changed, and its links.
 - **Eval cases:** the cases written; or, without an eval setup, each case
   you would write, with its prompt and what it grades, including one for
-  each "Do not use for" item.
+  each "Do not use for" item. List them even when the user asked for no
+  evals: a list in the report sets nothing up.
 - What `test-skill` reported in the last round, and the eval scores if
   they ran.
 - What you decided in "Settle the shape" without asking, so the user can

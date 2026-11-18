@@ -10,7 +10,7 @@ context:
 execution:
   prompt: >-
     The review-labels skill keeps getting used when people ask to fix a
-    label. Make it clear that it only reviews labels.
+    label. Change the skill to make clear that it only reviews labels.
   max_turns: 60
   timeout_seconds: 1200
   allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
