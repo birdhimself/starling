@@ -8,7 +8,7 @@ context:
   scaffold_script: scaffold.sh
 execution:
   prompt: >-
-    Check the review-labels skill.
+    Check whether the review-labels skill follows our rules for skills.
   max_turns: 20
   timeout_seconds: 600
   allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
