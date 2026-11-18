@@ -23,27 +23,29 @@ graders:
     target: {source: file, path: .agents/skills/review-labels/SKILL.md}
     pattern: '^name: review-labels$'
     flags: m
+  # The cases may be written with Write or from the shell, so these grade
+  # the files and the run rather than one tool.
   - name: writes-a-case
-    type: tool_used
-    tool: Write
-    input_match: 'evals/review-labels/[^"]*case\.yaml'
+    type: file_exists
+    path: evals/review-labels/*/case.yaml
   - name: tags-the-cases-with-the-skill
-    type: tool_used
-    tool: Write
-    input_match: 'evals/review-labels/[^"]*case\.yaml.*tags:\s*\[review-labels\]'
+    type: regex
+    target: trace
+    pattern: 'tags:\s*\[review-labels\]'
   - name: writes-a-must-not-run-case
-    type: tool_used
-    tool: Write
-    input_match: 'evals/review-labels/[^"]*case\.yaml.*max:\s*0'
+    type: regex
+    target: trace
+    pattern: 'input_match:\s*\\?[''"]?review-labels\\?[''"]?(\\n|\s)+(min:\s*0(\\n|\s)+)?max:\s*0'
   - name: runs-no-evals-unasked
     type: tool_used
     tool: Bash
     input_match: plugin\s+eval
     min: 0
     max: 0
+  # A case's fixture may commit, so grade the repository's own log: the
+  # scaffold leaves only its initial commit there.
   - name: never-commits
-    type: tool_used
-    tool: Bash
-    input_match: git\s+commit
-    min: 0
-    max: 0
+    type: regex
+    target: {source: file, path: .git/logs/HEAD}
+    pattern: '\tcommit( \((amend|merge)\))?: '
+    match: not_contains
