@@ -43,18 +43,25 @@ Read the `AGENTS.md` files of the directories the findings touch.
 Read the code each finding points at before judging it; a finding that is
 wrong about what the code does is common. Then sort it:
 
-- **Apply:** a clear defect, or a clear improvement the repository's
-  conventions support.
+- **Apply:** a clear defect in what the pull request changes, or a clear
+  improvement to it that the repository's conventions support. A defect
+  that leaves the pull request's own change unfinished is one, even in a
+  file the pull request does not touch.
 - **Drop:** wrong, or against a convention in an `AGENTS.md`. Record why.
 - **Hold:** uncertain. The current behavior may be intended, the fix trades
   one behavior for another, or it reaches past the pull request's topic.
-  Keep its proposed fix as a patch in a file outside the repository, made
-  with `mktemp "${TMPDIR:-/tmp}/finding.XXXXXX"`.
+  A rename, refactor or cleanup that the pull request's own change does
+  not need reaches past it, however clearly it improves the code: the user
+  decides whether it belongs in this pull request. Keep a held finding's
+  proposed fix as a patch in a file outside the repository, made with
+  `mktemp "${TMPDIR:-/tmp}/finding.XXXXXX"`.
 
 Weigh a finding by whether the condition it describes can be reached. A
 rare race is worth a fix only if the fix is small; a redesign for it is a
 drop or a hold. Work a finding reveals that does not belong to this pull
-request becomes a proposed follow-up issue.
+request becomes a proposed follow-up issue: so does a defect the pull
+request neither introduced nor needs fixed, even in a line next to its
+change.
 
 ## 3. Apply
 
