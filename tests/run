@@ -731,8 +731,10 @@ expect "$fg" "forge: issue relations usage" 2 "usage: forge" "$forge" issue rela
 # finish-pr's wait-ci script, against a fake forge wrapper that keeps the
 # pull request's state in files: head (the head commit, or move, the one it
 # moves to once its runs are read as finished), runs (one "id state" line per
-# run; reading them finishes the pending ones), checks (lines with pass or
-# fail), subjects, and on-ready (runs that marking it ready starts).
+# run; reading them finishes the pending ones), checks (lines with pass,
+# fail or pending; reading them passes the pending ones, unless stuck
+# exists), subjects, on-ready (runs that marking it ready starts) and
+# on-ready-checks (the checks it leaves).
 waitci="$root/.starling/skills/finish-pr/scripts/wait-ci"
 mkdir -p "$tmp/cibin" && cat >"$tmp/cibin/forge" <<'EOF'
 #!/bin/sh
@@ -752,11 +754,16 @@ case "$1 $2" in
 	;;
 "pr checks")
 	cat "$s/checks"
+	if grep -q pending "$s/checks"; then
+		[ -f "$s/stuck" ] || { sed 's/pending/pass/' "$s/checks" >"$s/checks.new" && mv "$s/checks.new" "$s/checks"; }
+		exit 1
+	fi
 	if grep -q fail "$s/checks"; then exit 1; fi
 	;;
 "pr ready")
 	touch "$s/ready"
 	if [ -f "$s/on-ready" ]; then cat "$s/on-ready" >>"$s/runs"; fi
+	if [ -f "$s/on-ready-checks" ]; then mv "$s/on-ready-checks" "$s/checks"; fi
 	;;
 *)
 	echo "fake forge: $*" >&2
@@ -805,6 +812,17 @@ wait_ci "wait-ci: marks ready and waits" 0 "build	pass" 7 --mark-ready
 if [ -f "$tmp/ci/ready" ] && grep -qx '200 completed' "$tmp/ci/runs"; then ok; else
 	bad "wait-ci: watched the runs marking it ready started" "$(cat "$tmp/ci/runs")"
 fi
+# The list of runs lags: marking it ready lists only a finished run while
+# the check of another is still pending.
+ci_state '101 completed
+' 'build	pass'
+printf '200 completed\n' >"$tmp/ci/on-ready"
+printf 'build\tpass\ntests\tpending\n' >"$tmp/ci/on-ready-checks"
+wait_ci "wait-ci: waits for a check missing from the runs" 0 "tests	pass" 7 --mark-ready
+ci_state '101 completed
+' 'build	pass
+tests	pending'
+wait_ci "wait-ci: waits for a pending check" 0 "tests	pass" 7
 ci_state '101 completed
 ' 'build	fail'
 wait_ci "wait-ci: a red draft stays a draft" 1 "not marking it ready" 7 --mark-ready
@@ -816,6 +834,11 @@ ci_state '101 pending
 ' 'build	pass'
 echo def456 >"$tmp/ci/move"
 wait_ci "wait-ci: the head moved" 4 "moved to def456" 7
+ci_state '101 completed
+' 'deploy	pending'
+touch "$tmp/ci/stuck"
+echo def456 >"$tmp/ci/move"
+wait_ci "wait-ci: a moved head ends the wait for a pending check" 4 "moved to def456" 7
 ci_state '' 'build	pass'
 wait_ci "wait-ci: no runs at all" 3 "no run appeared on abc123" 7
 
