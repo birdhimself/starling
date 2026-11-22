@@ -1079,6 +1079,34 @@ if [ "$(git -C "$tmp/act" config core.hooksPath)" = .starling/hooks ]; then ok; 
 fi
 out=$(cd "$tmp/act" && run "$act" 2>&1)
 if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "activate: quiet when active" "got: $out"; fi
+# An absolute path to Starling's hooks is Starling's hooks too, as is the
+# main checkout's from a linked worktree: tools that set up worktrees write
+# it so that every worktree shares the main checkout's hooks.
+abs=$(cd "$tmp/act/.starling/hooks" && pwd -P)
+git -C "$tmp/act" config core.hooksPath "$abs"
+out=$(cd "$tmp/act" && run "$act" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ] && [ "$(git -C "$tmp/act" config core.hooksPath)" = "$abs" ]; then ok; else
+	bad "activate: absolute path" "got: $out; core.hooksPath is '$(git -C "$tmp/act" config core.hooksPath)'"
+fi
+mkdir -p "$tmp/act/.starling/hooks/sub"
+git -C "$tmp/act" config core.hooksPath "$abs/sub/.."
+out=$(cd "$tmp/act" && run "$act" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "activate: absolute path with .." "got: $out"; fi
+git -C "$tmp/act" config core.hooksPath "$abs/sub"
+expect "$tmp/act" "activate: absolute path elsewhere" 1 "core.hooksPath is
+$abs/sub" "$act"
+rmdir "$tmp/act/.starling/hooks/sub"
+git -C "$tmp/act" config core.hooksPath "$abs"
+{
+	touch "$tmp/act/.starling/hooks/.keep" &&
+		git -C "$tmp/act" add .starling &&
+		git -C "$tmp/act" -c user.name=Test -c user.email=test@example.com \
+			-c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm 'test: add hooks' &&
+		git -C "$tmp/act" worktree add -q "$tmp/act-wt" 2>/dev/null
+} || exit 2
+out=$(cd "$tmp/act-wt" && run "$act" 2>&1)
+if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "activate: main checkout's hooks in a worktree" "got: $out"; fi
+git -C "$tmp/act" config core.hooksPath .starling/hooks
 git -C "$tmp/act" config core.hooksPath .husky/_
 expect "$tmp/act" "activate: leaves another hooks path" 1 "core.hooksPath is
 .husky/_" "$act"

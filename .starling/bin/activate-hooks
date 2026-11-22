@@ -5,8 +5,11 @@
 #
 # core.hooksPath is local git configuration, so every clone needs this once.
 # Claude Code runs it at the start of each session; people run it after
-# cloning. It sets core.hooksPath to .starling/hooks when it is unset or
-# already that, and says nothing.
+# cloning. It sets core.hooksPath to .starling/hooks when it is unset, and
+# says nothing when it already points to Starling's hooks: .starling/hooks,
+# or any other path to that directory, such as the absolute one that a tool
+# setting up git worktrees writes so that every worktree shares the main
+# checkout's hooks.
 #
 # When something else set core.hooksPath, such as husky, it changes nothing:
 # that tool would set it back. It prints a note instead, on standard output
@@ -21,10 +24,29 @@ set -u
 top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 2
 [ -d "$top/.starling/hooks" ] || exit 2
 
+# Prints the physical path of directory $1, relative to the top level, or
+# nothing when it does not exist.
+resolve() {
+	case $1 in
+	/*) (cd "$1" 2>/dev/null && pwd -P) ;;
+	*) (cd "$top" && cd "$1" 2>/dev/null && pwd -P) ;;
+	esac
+}
+
+# Whether core.hooksPath ($1) is Starling's hooks, of this checkout or, in a
+# linked worktree, of the main checkout.
+is_starling() {
+	[ "$1" = .starling/hooks ] && return 0
+	here=$(resolve "$1")
+	[ -n "$here" ] || return 1
+	[ "$here" = "$(resolve .starling/hooks)" ] && return 0
+	common=$(git -C "$top" rev-parse --git-common-dir) || return 1
+	main=$(resolve "$common/..")
+	[ -n "$main" ] && [ "$here" = "$(resolve "$main/.starling/hooks")" ]
+}
+
 current=$(git -C "$top" config --get core.hooksPath)
-case $current in
-'' | .starling/hooks) ;;
-*)
+if [ -n "$current" ] && ! is_starling "$current"; then
 	cat <<EOF
 Starling's git hooks are not active in this clone: core.hooksPath is
 $current, set by another tool such as husky. Commit messages are only
@@ -34,6 +56,5 @@ that set core.hooksPath. Removing it leaves the setting behind, so then run:
   git config --unset core.hooksPath && .starling/bin/activate-hooks
 EOF
 	exit 1
-	;;
-esac
+fi
 [ -n "$current" ] || git -C "$top" config core.hooksPath .starling/hooks
