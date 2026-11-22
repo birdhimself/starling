@@ -339,7 +339,13 @@ Rules that must hold are enforced; instructions explain them.
   script does (`test ! -d .starling || sh .starling/bin/activate-hooks || true`:
   npm runs `prepare` on every `npm ci`, also in Docker builds that leave
   `.starling/` out, so the test keeps those quiet). It sets the path only
-  when it is unset or already `.starling/hooks`. When another tool set it
+  when it is unset, and leaves it quietly when it already leads to
+  Starling's hooks: `.starling/hooks`, or another path to the same
+  directory, such as the absolute path that a tool setting up git
+  worktrees writes so that every worktree uses the main checkout's hooks
+  (from a linked worktree, the main checkout's `.starling/hooks` counts
+  too). Matching only the literal relative path called that a foreign
+  tool's path and printed a false warning. When another tool set it
   (husky sets `.husky/_` and resets it on every `npm install`), it changes
   nothing and prints a note, which reaches the model at session start; CI is
   the backstop until the project moves its hooks to `.githooks/` and drops
