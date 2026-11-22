@@ -4,7 +4,8 @@
 #   wait-ci PR [--mark-ready]
 #
 # Waits until every workflow run on the head commit of pull request PR has
-# finished, then prints its checks and exits with the result.
+# finished and none of its checks is pending, then prints its checks and
+# exits with the result.
 #
 # --mark-ready, for a draft: refuses while a fixup!, squash! or amend!
 # subject remains, waits for the draft's runs to settle, refuses if their
@@ -15,14 +16,17 @@
 #
 # Runs are tracked by head commit, since the runs that marking a pull
 # request ready starts can register after its checks were last read. The
-# forge is reached through .starling/bin/forge.
+# forge's list of runs can lag behind the runs that exist, so a pending
+# check keeps the wait going too. The forge is reached through
+# .starling/bin/forge.
 #
 # Exit status: 0 green, 1 failed or refused, 2 usage, 3 no run appeared on
 # the head within the time limit, 4 the head moved while waiting (run it
 # again for the new head).
 #
 # WAIT_CI_POLL sets the seconds between polls (default 10), WAIT_CI_LIMIT
-# the seconds to wait for runs to appear (default 180). STARLING_FORGE names
+# the seconds to wait for runs to appear (default 180); it never limits the
+# wait for runs or checks that exist to finish. STARLING_FORGE names
 # the forge wrapper to use (tests set it to a fake).
 
 set -u
@@ -62,14 +66,22 @@ run_ids() {
 	"$forge" runs "$sha" | awk '{ print $1 }' | sort
 }
 
-# watch_runs: until no run on the head is unfinished. Runs can register
-# late, so the list is read again after each pass.
+# watch_runs: until no run on the head is unfinished and no check of the
+# pull request is pending. Runs can register late, and the list of runs
+# can miss a run whose check is already pending, so both are read again
+# after each pass. The checks are those of the current head, so a head
+# that moved ends the wait rather than waiting on a commit not watched.
 watch_runs() {
 	while :; do
 		list=$("$forge" runs "$sha") || return 1
 		case $list in
 		*pending*) ;;
-		*) return 0 ;;
+		*)
+			"$forge" pr checks "$pr" 2>/dev/null |
+				awk -F '\t' '$2 == "pending" { found = 1 } END { exit !found }' || return 0
+			moved=$(head_commit) || moved=
+			[ -z "$moved" ] || [ "$moved" = "$sha" ] || return 0
+			;;
 		esac
 		sleep "$poll"
 	done

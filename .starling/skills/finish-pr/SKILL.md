@@ -66,8 +66,9 @@ Run, in the background where the agent can, since it takes minutes:
 
 Leave out `--mark-ready` for a pull request that is already ready, or when
 the caller said not to mark it. The script waits for every run on the head
-commit, refuses leftover fixup subjects, marks a green draft ready, and
-waits for the runs that marking it ready starts. Its exit status:
+commit and every pending check, refuses leftover fixup subjects, marks a
+green draft ready, and waits for the runs that marking it ready starts. Its
+exit status:
 
 - `0`: green, and ready if asked.
 - `1`: a check failed, or it refused; it prints the checks or the
