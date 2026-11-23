@@ -3,9 +3,10 @@
 #
 #   deny-hook-bypass < hook-input.json
 #
-# A Claude Code PreToolUse hook for the Bash tool. It reads the hook input
-# (JSON) on standard input, takes tool_input.command and checks every git
-# command in it. It blocks:
+# A PreToolUse hook for the shell tool: Bash in Claude Code, run_command in
+# Antigravity CLI. It reads the hook input (JSON) on standard input, takes the
+# command (tool_input.command, or toolCall.args.CommandLine in Antigravity
+# CLI) and checks every git command in it. It blocks:
 #   - --no-verify on any git command, and git commit -n (also inside -anm)
 #   - git -c or --config-env overrides of core.hooksPath or hook.*
 #   - GIT_CONFIG_PARAMETERS or GIT_CONFIG_COUNT set in front of git
@@ -16,7 +17,7 @@
 # -n passes.
 #
 # Exit status: 0 allow, 2 block, with the reason on standard error, which
-# Claude Code shows the model. Input it cannot read is allowed: CI checks
+# both agents show the model. Input it cannot read is allowed: CI checks
 # every commit anyway.
 
 set -u
@@ -35,9 +36,10 @@ function hexval(h,   i, v) {
 	return v
 }
 
-# The decoded value of the first "command" key, or "" without one.
+# The decoded value of the first "command" or "CommandLine" key, or ""
+# without one.
 function command_of(s,   rest, out, c, e, v) {
-	if (!match(s, /[{,][ \t\r\n]*"command"[ \t\r\n]*:[ \t\r\n]*"/)) return ""
+	if (!match(s, /[{,][ \t\r\n]*"(command|CommandLine)"[ \t\r\n]*:[ \t\r\n]*"/)) return ""
 	rest = substr(s, RSTART + RLENGTH); out = ""
 	while (match(rest, /[\\"]/)) {
 		out = out substr(rest, 1, RSTART - 1)

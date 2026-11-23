@@ -20,6 +20,8 @@
 #     and prints the rule that keeps Renovate off Starling's files
 #   - creates .claude/settings.json from .starling/claude-settings.json, or
 #     merges Starling's entries into it with jq
+#   - creates .agents/hooks.json from .starling/agents-hooks.json, or sets
+#     its "starling" hook set with jq, for Antigravity CLI
 #   - activates Starling's git hooks
 # and prints a summary with the commit header to use, and a hint at the
 # adopt-starling skill where the project has a setup of its own or an
@@ -202,6 +204,22 @@ elif command -v "$jq" >/dev/null 2>&1 &&
 	fi
 else
 	note "Merge .starling/claude-settings.json into .claude/settings.json by hand (jq is missing or could not read the file): Starling's attribution keys, without an empty attribution.commit or attribution.pr, and its hooks in place of any hook commands under .starling/bin/."
+fi
+
+# Antigravity CLI hooks. It runs every named hook set in .agents/hooks.json,
+# from .agents/; Starling owns the set named "starling", the project the
+# others.
+if [ ! -e .agents/hooks.json ]; then
+	cp .starling/agents-hooks.json .agents/hooks.json
+elif command -v "$jq" >/dev/null 2>&1 &&
+	merged=$("$jq" --slurpfile s .starling/agents-hooks.json '.starling = $s[0].starling' .agents/hooks.json); then
+	if [ "$merged" != "$(cat .agents/hooks.json)" ]; then
+		printf '%s\n' "$merged" >.agents/hooks.json
+		[ -z "$prettier" ] ||
+			note "jq rewrote .agents/hooks.json to set Starling's hooks. If Prettier formats it, run Prettier on it before committing."
+	fi
+else
+	note "Set the \"starling\" entry of .agents/hooks.json to the one in .starling/agents-hooks.json by hand (jq is missing or could not read the file)."
 fi
 
 # Git hooks.

@@ -21,7 +21,8 @@
 #   Commit checks:   other tools that check commit messages
 #   Scopes:          the scopes .starling.conf allows and the ones the last
 #                    500 commits used
-#   Settings:        whether .claude/settings.json has Starling's hooks
+#   Settings:        whether .claude/settings.json and .agents/hooks.json
+#                    have Starling's hooks
 #   Renovate:        whether its configuration leaves Starling's files alone
 #
 # Run it anywhere inside the repository.
@@ -242,6 +243,12 @@ if [ -f .claude/settings.json ] && grep -q '\.starling/bin/deny-hook-bypass' .cl
 	echo "  .claude/settings.json has Starling's hooks"
 else
 	echo "  .claude/settings.json lacks Starling's hooks; merge .starling/claude-settings.json into it"
+fi
+if [ -f .agents/hooks.json ] && grep -q '\.starling/bin/deny-hook-bypass' .agents/hooks.json &&
+	grep -q '\.starling/bin/activate-hooks' .agents/hooks.json; then
+	echo "  .agents/hooks.json has Starling's hooks"
+else
+	echo "  .agents/hooks.json lacks Starling's hooks; set its \"starling\" entry to the one in .starling/agents-hooks.json"
 fi
 
 echo "Renovate:"

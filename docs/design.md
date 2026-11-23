@@ -9,7 +9,7 @@ implements it, rather than working around it.
 Starling holds the agent instructions, skills, scripts and checks shared
 across my repositories, so they are written once instead of repeated per
 project and do not drift apart. It serves every coding agent, not only
-Claude Code: Codex and others read the same files.
+Claude Code: Codex, Antigravity CLI and others read the same files.
 
 ## Installation model
 
@@ -42,9 +42,12 @@ Claude Code: Codex and others read the same files.
 ├── hooks/                       # git hooks: commit-msg, ...
 ├── skills/<name>/               # shared skills
 ├── claude-settings.json         # merged into .claude/settings.json
+├── agents-hooks.json            # merged into .agents/hooks.json
 └── workflows/<forge>/           # copied to where the forge reads them
 .claude/skills/<name>  -> ../../.starling/skills/<name>   # for Claude Code
-.agents/skills/<name>  -> ../../.starling/skills/<name>   # for Codex
+.agents/skills/<name>  -> ../../.starling/skills/<name>   # for Codex and
+                                 # Antigravity CLI
+.agents/hooks.json                                        # Antigravity CLI's hooks
 .github/workflows/starling-commits.yml                    # CI commit check,
                                  # on Forgejo in .forgejo/workflows/
 .starling.conf                   # optional, owned by the project
@@ -52,8 +55,8 @@ AGENTS.md                        # owned by the project, plus one import line
 ```
 
 Starling also writes a few files outside `.starling/`: the skill links, the
-import line in `AGENTS.md`, its entries in `.claude/settings.json` and the
-CI workflow. The installer and the updater own exactly those paths and
+import line in `AGENTS.md`, its entries in `.claude/settings.json`, its
+hook set in `.agents/hooks.json` and the CI workflow. The installer and the updater own exactly those paths and
 rewrite them on every update. Everything else belongs to the project,
 including its own skills and `.starling.conf`.
 
@@ -79,8 +82,10 @@ including its own skills and `.starling.conf`.
   `.claude/settings.json`
   (created, or merged with `jq`: Starling's attribution keys, without the
   empty `commit` and `pr` of earlier versions, and hook
-  commands under `.starling/bin/` replaced; without `jq`, a note), and the
-  hook activation (its note passed on).
+  commands under `.starling/bin/` replaced; without `jq`, a note),
+  `.agents/hooks.json` (created, or its `starling` hook set replaced with
+  `jq`; without `jq`, a note), and the hook activation (its note passed
+  on).
 - Formatters and bots: every update replaces `.starling/` and the workflows,
   so a project's tools must leave them alone. In a project that uses
   Prettier (a Prettier config or ignore file, or `prettier` in
@@ -329,12 +334,13 @@ Rules that must hold are enforced; instructions explain them.
 | -------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------- |
 | `.starling/bin/check-commit-msg` | the single implementation of the commit rules         | used by all layers below                                      |
 | commit-msg hook                  | `.starling/hooks/commit-msg` via `core.hooksPath`     | every local commit                                            |
-| Claude Code hook                 | `.starling/bin/deny-hook-bypass` blocks hook bypasses | agents getting around the hooks                               |
+| agent hook                       | `.starling/bin/deny-hook-bypass` blocks hook bypasses | agents getting around the hooks                               |
 | CI workflow                      | runs the checker over the pushed range                | everything else: web edits, bots, clones without active hooks |
 
 - `core.hooksPath` is local git config, so each clone must activate the
   hooks once: `.starling/bin/activate-hooks`. Claude Code runs it at the
-  start of every session (local, container and web); people run it after
+  start of every session (local, container and web), and Antigravity CLI
+  at the first prompt of every conversation; people run it after
   cloning, or a dev container's `postCreateCommand` or a Node `prepare`
   script does (`test ! -d .starling || sh .starling/bin/activate-hooks || true`:
   npm runs `prepare` on every `npm ci`, also in Docker builds that leave
@@ -369,7 +375,11 @@ Rules that must hold are enforced; instructions explain them.
   passes even when the message mentions `-n` or `--no-verify`. Input it
   cannot read is allowed; it is a guard, not the enforcement. Not caught:
   git aliases, `sh -c`, `xargs`. Fixture commands in
-  `tests/deny-hook-bypass/` pin the behavior.
+  `tests/deny-hook-bypass/` pin the behavior, each in the hook input of
+  both agents. It reads the command from the first `command` key (Claude
+  Code's `tool_input.command`) or `CommandLine` key (Antigravity CLI's
+  `toolCall.args.CommandLine`), and both agents block the tool on exit 2
+  and show its standard error to the model.
 - The CI workflow (`.starling/workflows/github/starling-commits.yml`,
   installed as `.github/workflows/starling-commits.yml`; Starling's own copy
   is identical, which a test checks) runs the checker vendored in the same
@@ -434,6 +444,29 @@ same file, which a test checks.
   output into the model's context. `PreToolUse` on Bash runs
   `deny-hook-bypass`; exit 2 blocks the command and shows the reason to the
   model. Both use `"$CLAUDE_PROJECT_DIR"`.
+
+## Antigravity CLI hooks
+
+`.starling/agents-hooks.json`, merged into the project's
+`.agents/hooks.json` by the installer (with `jq`; without it, the
+installer says what to merge). Starling's own `.agents/hooks.json` is the
+same file, which a test checks.
+
+- Antigravity CLI reads named hook sets from `.agents/hooks.json`, so
+  Starling owns the set named `starling` and replaces it whole on every
+  update; the project's own sets stay. Claude Code's settings have no such
+  names, which is why their merge picks out commands under `.starling/bin/`
+  instead.
+- It runs each command with `sh -c` in the directory of that `hooks.json`,
+  so the commands start with `../.starling/bin/`. It has no variable like
+  `$CLAUDE_PROJECT_DIR`.
+- `SessionStart` runs `activate-hooks || true`. It fires at the first
+  prompt of a conversation and after `/clear`, not on `--continue` or
+  `/compact`, which is enough: `core.hooksPath` stays set in the clone.
+- `PreToolUse` on `run_command`, its shell tool, runs `deny-hook-bypass`.
+  A hook that prints nothing and exits 0 leaves the decision to the normal
+  permissions; one that prints `{}` would deny every command, so the guard
+  must stay silent when it allows.
 
 ## Skills
 
@@ -593,3 +626,18 @@ Checked on 2026-11-17 with Forgejo 15.0.11 and Forgejo Runner 12.13.2.
 - An issue's dependencies are read at `issues/<n>/dependencies` and
   `issues/<n>/blocks`, and written with the other issue's owner,
   repository and number.
+
+Checked on 2026-11-23 with Antigravity CLI 1.5.15 and Claude Code 2.1.330.
+
+- Antigravity CLI loads `.agents/hooks.json` in print mode, also in a
+  folder it was not told to trust, and runs each command in `.agents/` with
+  one JSON object on standard input.
+- Its `SessionStart` hook set `core.hooksPath` in a fresh clone, and a
+  commit with the message `updated stuff` was then refused by the
+  commit-msg hook.
+- Its shell tool is `run_command`, with the command in
+  `toolCall.args.CommandLine`. A `PreToolUse` hook that exits 2 blocks the
+  tool, and its standard error reaches the model.
+- Antigravity CLI finds skills in `.agents/skills/<name>/SKILL.md`, has
+  subagents with a fresh context (`invoke_subagent`), and has no code
+  review command.

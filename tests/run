@@ -102,6 +102,9 @@ fi
 if cmp -s "$root/.claude/settings.json" "$root/.starling/claude-settings.json"; then ok; else
 	bad "settings: .claude/settings.json" "differs from .starling/claude-settings.json"
 fi
+if cmp -s "$root/.agents/hooks.json" "$root/.starling/agents-hooks.json"; then ok; else
+	bad "settings: .agents/hooks.json" "differs from .starling/agents-hooks.json"
+fi
 
 # Starling checks its own commits with the workflow the installer installs.
 if cmp -s "$root/.github/workflows/starling-commits.yml" "$root/.starling/workflows/github/starling-commits.yml"; then ok; else
@@ -1058,11 +1061,12 @@ expect "$other" "context: no commits yet" 0 "Commits: none yet" "$context"
 expect "$tmp" "context: outside a repository" 2 "not inside a git work tree" "$context"
 
 # The Claude Code hook that blocks hook bypasses. tests/deny-hook-bypass/
-# NAME.cmd is a Bash command: without NAME.expect it must be allowed, with it
-# blocked with that text. bash_input wraps it in Claude Code's hook input.
+# NAME.cmd is a shell command: without NAME.expect it must be allowed, with
+# it blocked with that text. hook_input wraps it in the hook input of Claude
+# Code (claude) or Antigravity CLI (agy), and every command runs with both.
 guard="$root/.starling/bin/deny-hook-bypass"
-bash_input() {
-	LC_ALL=C awk 'BEGIN { RS = "\001" } {
+hook_input() { # AGENT FILE
+	LC_ALL=C awk -v agent="$1" 'BEGIN { RS = "\001" } {
 		s = $0; sub(/\n$/, "", s); out = ""
 		for (i = 1; i <= length(s); i++) {
 			c = substr(s, i, 1)
@@ -1072,23 +1076,28 @@ bash_input() {
 			else if (c == "\t") c = "\\t"
 			out = out c
 		}
-		printf "{\"session_id\":\"test\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"%s\",\"description\":\"test\"}}", out
-	}' "$1"
+		if (agent == "agy")
+			printf "{\"conversationId\":\"test\",\"hookEventName\":\"PreToolUse\",\"lastUserInput\":\"test\",\"stepIdx\":3,\"toolCall\":{\"args\":{\"CommandLine\":\"%s\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"test\"},\"id\":\"call_1\",\"name\":\"run_command\"}}", out
+		else
+			printf "{\"session_id\":\"test\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"%s\",\"description\":\"test\"}}", out
+	}' "$2"
 }
 for cmd in "$root"/tests/deny-hook-bypass/*.cmd; do
-	name="guard: $(basename "$cmd" .cmd)"
-	out=$(bash_input "$cmd" | run "$guard" 2>&1)
-	status=$?
-	if [ -f "${cmd%.cmd}.expect" ]; then
-		want=$(cat "${cmd%.cmd}.expect")
-		if [ "$status" -eq 2 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
-			bad "$name" "expected exit 2 and \"$want\", got exit $status:
+	for agent in claude agy; do
+		name="guard ($agent): $(basename "$cmd" .cmd)"
+		out=$(hook_input "$agent" "$cmd" | run "$guard" 2>&1)
+		status=$?
+		if [ -f "${cmd%.cmd}.expect" ]; then
+			want=$(cat "${cmd%.cmd}.expect")
+			if [ "$status" -eq 2 ] && printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
+				bad "$name" "expected exit 2 and \"$want\", got exit $status:
+$out"
+			fi
+		elif [ "$status" -eq 0 ] && [ -z "$out" ]; then ok; else
+			bad "$name" "expected to be allowed, got exit $status:
 $out"
 		fi
-	elif [ "$status" -eq 0 ] && [ -z "$out" ]; then ok; else
-		bad "$name" "expected to be allowed, got exit $status:
-$out"
-	fi
+	done
 done
 out=$(printf 'not json' | run "$guard" 2>&1)
 if [ $? -eq 0 ] && [ -z "$out" ]; then ok; else bad "guard: unreadable input" "expected to be allowed: $out"; fi
@@ -1215,6 +1224,9 @@ tgt=$tmp/target
 		mkdir "$tgt/.claude" &&
 		printf '{"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "./lint.sh"}]}]}}\n' \
 			>"$tgt/.claude/settings.json" &&
+		mkdir "$tgt/.agents" &&
+		printf '{"lint": {"PreToolUse": [{"matcher": "edit_file", "hooks": [{"type": "command", "command": "./lint.sh"}]}]}}\n' \
+			>"$tgt/.agents/hooks.json" &&
 		commit_all "$tgt" "docs: start" &&
 		git -C "$tgt" update-ref refs/remotes/origin/master HEAD &&
 		git -C "$tgt" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
@@ -1242,6 +1254,8 @@ assert "install: hooks active" [ "$(git -C "$tgt" config core.hooksPath)" = .sta
 if [ "$has_jq" = 1 ]; then
 	assert "install: project hook kept" grep -q 'lint.sh' "$tgt/.claude/settings.json"
 	assert "install: Starling's hooks merged" grep -q 'deny-hook-bypass' "$tgt/.claude/settings.json"
+	assert "install: project's Antigravity hooks kept" grep -q 'lint.sh' "$tgt/.agents/hooks.json"
+	assert "install: Starling's Antigravity hooks set" grep -q '"starling"' "$tgt/.agents/hooks.json"
 fi
 expect "$tgt" "install: refuses a second install" 1 "already installed" "$root/install"
 commit_all "$tgt" "build: install Starling v0.1.0"
@@ -1256,6 +1270,7 @@ assert "update: new workflow" [ -f "$tgt/.github/workflows/starling-extra.yml" ]
 assert "update: one import line" [ "$(grep -c '@\.starling/AGENTS\.md$' "$tgt/AGENTS.md")" = 1 ]
 if [ "$has_jq" = 1 ]; then
 	assert "update: Starling's hooks not doubled" [ "$(grep -c 'deny-hook-bypass' "$tgt/.claude/settings.json")" = 1 ]
+	assert "update: Antigravity hooks not doubled" [ "$(grep -c 'deny-hook-bypass' "$tgt/.agents/hooks.json")" = 1 ]
 fi
 commit_all "$tgt" "build: update Starling to v0.2.0"
 echo change >>"$tgt/AGENTS.md"
@@ -1285,6 +1300,7 @@ assert "install: AGENTS.md created" [ "$(cat "$plain/AGENTS.md")" = "# plain
 
 $import" ]
 assert "install: settings created" cmp -s "$plain/.claude/settings.json" "$plain/.starling/claude-settings.json"
+assert "install: Antigravity hooks created" cmp -s "$plain/.agents/hooks.json" "$plain/.starling/agents-hooks.json"
 assert "install: no .prettierignore without Prettier" gone "$plain/.prettierignore"
 
 if printf '%s\n' "$out" | grep -qF "The forge is unknown without an origin remote"; then ok; else
@@ -1357,6 +1373,7 @@ husky=$tmp/husky
 	git init -q "$husky" && printf 'Project rules.\n' >"$husky/AGENTS.md" &&
 		mkdir -p "$husky/.claude/skills/commit-changes" &&
 		echo '{"model": "opus"}' >"$husky/.claude/settings.json" &&
+		mkdir "$husky/.agents" && echo '{"lint": {}}' >"$husky/.agents/hooks.json" &&
 		echo "# Own skill" >"$husky/.claude/skills/commit-changes/SKILL.md" &&
 		commit_all "$husky" "docs: start" && git -C "$husky" config core.hooksPath .husky/_
 } || exit 2
@@ -1366,7 +1383,7 @@ out=$(cd "$husky" && run "$root/install" v0.1.0 2>&1)
 status=$?
 unset STARLING_JQ
 assert "install: despite husky" [ "$status" -eq 0 ]
-for want in "core.hooksPath is" "belongs to the project" "by hand"; do
+for want in "core.hooksPath is" "belongs to the project" "by hand" 'entry of .agents/hooks.json'; do
 	if printf '%s\n' "$out" | grep -qF -- "$want"; then ok; else
 		bad "install: note \"$want\"" "$out"
 	fi
@@ -1375,6 +1392,8 @@ assert "install: import line first without a heading" [ "$(sed -n 1p "$husky/AGE
 assert "install: project skill untouched" real_dir "$husky/.claude/skills/commit-changes"
 assert "install: hooks path left to husky" [ "$(git -C "$husky" config core.hooksPath)" = .husky/_ ]
 assert "install: settings untouched without jq" [ "$(cat "$husky/.claude/settings.json")" = '{"model": "opus"}' ]
+assert "install: Antigravity hooks untouched without jq" [ "$(cat "$husky/.agents/hooks.json")" = '{"lint": {}}' ]
+
 
 # adopt-starling's survey script, in the targets above. $husky has an
 # install that is not committed, a project skill with one of Starling's
@@ -1392,6 +1411,7 @@ surveyed "Starling's skill" "  open-pr: Opens a pull request"
 surveyed "what a policy may hold" '  open-pr: none. If `.agents/policy/open-pr.md` exists, read it first. It holds'
 surveyed "another tool's hooks path" "core.hooksPath is .husky/_, set by another tool"
 surveyed "settings without Starling's hooks" ".claude/settings.json lacks Starling's hooks"
+surveyed "Antigravity hooks without Starling's" ".agents/hooks.json lacks Starling's hooks"
 surveyed "no scopes" "  Used in the last 500 commits: none"
 if printf '%s\n' "$out" | grep -q '^  commit-changes: .*agents/policy'; then
 	bad "survey: no policy line for a skill that reads none" "$out"
@@ -1435,7 +1455,10 @@ surveyed "commitlint" "  commitlint.config.js: commitlint's configuration"
 surveyed "allowed scopes" "  Allowed by .starling.conf: api ui"
 surveyed "used scopes" "  Used in the last 500 commits: api (2), web (1)"
 surveyed "Renovate without the rule" "  package.json needs this rule in its packageRules:"
-if [ "$has_jq" = 1 ]; then surveyed "settings with Starling's hooks" ".claude/settings.json has Starling's hooks"; fi
+if [ "$has_jq" = 1 ]; then
+	surveyed "settings with Starling's hooks" ".claude/settings.json has Starling's hooks"
+	surveyed "Antigravity hooks with Starling's" ".agents/hooks.json has Starling's hooks"
+fi
 expect "$fmt" "survey: Renovate with the rule" 0 "  renovate.json5 leaves Starling's files alone" "$survey"
 surveyed "a committed first install" "Starling: v0.2.0, a first install, committed"
 surveyed "no other commit checks" "  none besides Starling's"
