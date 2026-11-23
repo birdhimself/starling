@@ -34,7 +34,9 @@ Starling repository.
 - When you, an AI model, wrote or co-wrote the code or text a commit
   changes, end its message with `Co-authored-by: <model> <address>` for the
   model actually running, in exactly this casing, e.g.
-  `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>`. Committing
+  `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>`. A model whose
+  vendor publishes no address uses `noreply@<vendor>.invalid`, e.g.
+  `Co-authored-by: Gemini 3 Pro <noreply@google.invalid>`. Committing
   someone else's edits does not count. This replaces any trailer your
   agent adds by default: write this one, and only this one.
 

@@ -142,11 +142,12 @@ git reads only the last paragraph as trailers.
   changes, add `Co-authored-by: <model> <address>` with the model actually
   running, e.g. `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>`.
   Writing the message does not count: changes someone else made get no
-  trailer, even when you commit them. Claude models use
-  `noreply@anthropic.com`; other agents use the address their own
-  instructions give, and without one leave the trailer out and say so in
-  the report. Write `Co-authored-by` exactly like this, even where other
-  instructions show `Co-Authored-By`.
+  trailer, even when you commit them. Use the address the model's vendor
+  publishes for it, and without one `noreply@<vendor>.invalid`, such as
+  `Co-authored-by: Gemini 3 Pro <noreply@google.invalid>`. Never make up
+  an address at the vendor's real domain or borrow another product's:
+  GitHub credits whoever owns it. Write `Co-authored-by` exactly like
+  this, even where other instructions show `Co-Authored-By`.
 - Never add `Claude-Session` or any other trailer.
 
 ## 5. Check and commit
