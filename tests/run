@@ -91,11 +91,11 @@ missing=$(for dir in "$root"/.starling/skills/*/; do
 done)
 if [ -z "$missing" ]; then ok; else bad "readme: lists every skill" "$missing"; fi
 
-# Claude Code resolves an @ import only where the path ends the line or is
-# followed by a space: in "@.starling/AGENTS.md." the period becomes part of
-# the path.
-if grep -q ' @\.starling/AGENTS\.md$' "$root/AGENTS.md"; then ok; else
-	bad "instructions: import line" "AGENTS.md needs a line ending in ' @.starling/AGENTS.md'"
+# The import line has Claude Code's form and Antigravity CLI's. Claude Code
+# resolves an @ import only where the path ends the line or is followed by a
+# space: in "@.starling/AGENTS.md." the period becomes part of the path.
+if grep -q ' @\.starling/AGENTS\.md @\[Starling\](\.starling/AGENTS\.md)$' "$root/AGENTS.md"; then ok; else
+	bad "instructions: import line" "AGENTS.md needs a line ending in ' @.starling/AGENTS.md @[Starling](.starling/AGENTS.md)'"
 fi
 
 # Starling uses its own Claude Code settings, as the installer writes them.
@@ -1212,7 +1212,7 @@ star=$tmp/star
 } || exit 2
 STARLING_REPO=file://$star
 export STARLING_REPO
-import='This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md'
+import='This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md @[Starling](.starling/AGENTS.md)'
 has_jq=0
 command -v jq >/dev/null 2>&1 && has_jq=1
 
@@ -1267,7 +1267,8 @@ else ok; fi
 assert "update: version" [ "$(cat "$tgt/.starling/VERSION")" = v0.2.0 ]
 assert "update: link to a removed skill removed" gone "$tgt/.claude/skills/commit-changes"
 assert "update: new workflow" [ -f "$tgt/.github/workflows/starling-extra.yml" ]
-assert "update: one import line" [ "$(grep -c '@\.starling/AGENTS\.md$' "$tgt/AGENTS.md")" = 1 ]
+assert "update: one import line" [ "$(grep -c '@\.starling/AGENTS\.md' "$tgt/AGENTS.md")" = 1 ]
+assert "update: import line unchanged" [ "$(sed -n 3p "$tgt/AGENTS.md")" = "$import" ]
 if [ "$has_jq" = 1 ]; then
 	assert "update: Starling's hooks not doubled" [ "$(grep -c 'deny-hook-bypass' "$tgt/.claude/settings.json")" = 1 ]
 	assert "update: Antigravity hooks not doubled" [ "$(grep -c 'deny-hook-bypass' "$tgt/.agents/hooks.json")" = 1 ]
@@ -1394,6 +1395,17 @@ assert "install: hooks path left to husky" [ "$(git -C "$husky" config core.hook
 assert "install: settings untouched without jq" [ "$(cat "$husky/.claude/settings.json")" = '{"model": "opus"}' ]
 assert "install: Antigravity hooks untouched without jq" [ "$(cat "$husky/.agents/hooks.json")" = '{"lint": {}}' ]
 
+# A target with the import line of an earlier version, wrapped: an update
+# adds Antigravity CLI's form to it rather than a second line.
+early=$tmp/early
+{
+	git init -q "$early" &&
+		printf '# Early\n\nThis repository also follows the shared rules in Starling; read them\nbefore starting any task: @.starling/AGENTS.md\n\nRules.\n' >"$early/AGENTS.md" &&
+		commit_all "$early" "docs: start"
+} || exit 2
+expect "$early" "install: over the line of an earlier version" 0 "the form of the import that Antigravity CLI follows" "$root/install"
+assert "install: earlier import line completed" [ "$(sed -n 4p "$early/AGENTS.md")" = 'before starting any task: @.starling/AGENTS.md @[Starling](.starling/AGENTS.md)' ]
+assert "install: no second import line" [ "$(grep -c 'starling/AGENTS\.md' "$early/AGENTS.md")" = 1 ]
 
 # adopt-starling's survey script, in the targets above. $husky has an
 # install that is not committed, a project skill with one of Starling's
