@@ -342,6 +342,20 @@ The `commit-changes` skill describes the format, and
   the message does not count: an agent committing someone else's edits adds
   no trailer. It names the model actually running. This is a rule in the
   instructions, not a check, because humans commit too.
+- **The address is the one the vendor publishes, else
+  `noreply@<vendor>.invalid`.** The rules name no vendor's address as a
+  rule, only in examples, so that every model follows the same rule and a
+  changed address needs no change here. Anthropic's is the one Claude
+  Code writes in its own trailer; Google publishes none for Gemini or
+  Antigravity CLI. GitHub credits a commit to whoever verified the
+  trailer's address, and the addresses in use credit the wrong one:
+  `antigravity@google.com` reaches a personal account, and the Gemini
+  Code Assist bot's noreply address names another product. Nobody can
+  verify an address at the reserved `.invalid` domain (RFC 2606), so the
+  trailer names the model, `git log` still finds it, and GitHub credits
+  no one. Leaving the trailer out instead, as an earlier rule said,
+  hid which commits an AI wrote. Once Google publishes an address,
+  agents use it without a change to the rules.
 - **Closing keywords** such as `Closes #123` belong in the pull request
   body, not in commits.
 - **`fixup!`, `squash!` and `amend!` commits** and git's own `Revert "..."`
