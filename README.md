@@ -212,10 +212,13 @@ I use Starling with Claude Code, Codex and Antigravity CLI (`agy`).
   read the file, which it does most of the time but not always. The rules
   that matter are enforced by the git hook and CI, so a miss costs a failed
   check, not a bad commit. `ship-issue` and `ship-issue-batch` need Claude
-  Code, because they use its subagents and its `/code-review`.
+  Code or, for `ship-issue`, Antigravity CLI, because they spawn a fresh
+  agent to review.
 - **Antigravity CLI** reads `AGENTS.md` and follows the second form of the
   import on the import line, `@[Starling](.starling/AGENTS.md)`. It finds
   the skills in `.agents/skills` and runs the hooks in `.agents/hooks.json`.
+  In `ship-issue` its reviewer reviews by itself, since Antigravity CLI has
+  no `/code-review`.
 
 ## Working on Starling
 

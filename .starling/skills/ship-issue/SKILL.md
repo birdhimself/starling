@@ -1,6 +1,6 @@
 ---
 name: ship-issue
-description: Takes an issue through the whole pipeline in Claude Code. It implements the issue with implement-issue, has each resulting pull request reviewed by a fresh agent that never saw the implementation, applies the findings with apply-review-findings, asks the user about held findings in one round, and brings each pull request to ready with finish-pr. Ends at ready pull requests, never merged. Use when asked to ship, fully deliver, or implement and review an issue end to end. Do not use for implementing without a review (use `implement-issue`), for shipping several issues at once (use `ship-issue-batch`), for answering review threads (use `resolve-review-threads`), for reviewing an existing pull request on its own, or for merging.
+description: Takes an issue through the whole pipeline in Claude Code or Antigravity CLI. It implements the issue with implement-issue, has each resulting pull request reviewed by a fresh agent that never saw the implementation, applies the findings with apply-review-findings, asks the user about held findings in one round, and brings each pull request to ready with finish-pr. Ends at ready pull requests, never merged. Use when asked to ship, fully deliver, or implement and review an issue end to end. Do not use for implementing without a review (use `implement-issue`), for shipping several issues at once (use `ship-issue-batch`), for answering review threads (use `resolve-review-threads`), for reviewing an existing pull request on its own, or for merging.
 argument-hint: "<issue>"
 ---
 
@@ -10,8 +10,8 @@ Implement an issue, have every pull request reviewed by an agent that never
 saw the implementation happen, fold the fixes in, and end with ready pull
 requests. What is left for the user is testing the change and merging it.
 
-This skill needs Claude Code: it spawns reviewer subagents in worktrees and
-uses Claude Code's `/code-review`. In another agent, say so, and offer the
+This skill needs an agent that can spawn a subagent with a fresh context:
+Claude Code or Antigravity CLI. In another agent, say so, and offer the
 `implement-issue` skill followed by the `finish-pr` skill instead.
 
 ## Contract
@@ -42,14 +42,30 @@ the next step precisely because you wrote the code.
 
 ## 2. Review each pull request independently
 
-For each pull request, bottom of a stack first, spawn a fresh reviewer:
-the Agent tool with `subagent_type: "general-purpose"` and
-`isolation: "worktree"`. Fill in `references/reviewer-prompt.md` with the
-repository's path, the pull request number, its head commit, its actual
-base branch (the branch below it in a stack), the policy's worktree setup,
-and a patch path outside the repository. Pass nothing else: no notes on
-how the change was made, and no assessment of your own. Never reuse a
-reviewer for a second pull request.
+For each pull request, bottom of a stack first, spawn a fresh reviewer
+with `references/reviewer-prompt.md` as its whole prompt. Fill it in with
+the repository's path, the pull request number, its head commit, its
+actual base branch (the branch below it in a stack), the policy's worktree
+setup, a patch path outside the repository and, in Antigravity CLI, the
+reviewer's worktree. Keep the prompt's parts for your agent:
+
+- **Claude Code:** the Agent tool with `subagent_type: "general-purpose"`
+  and `isolation: "worktree"`, with the prompt's Claude Code parts. The
+  reviewer runs `/code-review`.
+- **Antigravity CLI:** first create the reviewer's worktree yourself:
+
+  ```sh
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/review.XXXXXX") && git worktree add --detach "$wt" <head commit>
+  ```
+
+  Spawn the reviewer with `invoke_subagent`, with the prompt's
+  Antigravity CLI parts and `$wt` as its worktree, and wait for its
+  report. Antigravity CLI has no `/code-review`, so the prompt gives the
+  reviewer the review to do itself. Once its findings are applied, remove
+  the worktree: `git worktree remove --force "$wt"`.
+
+Pass nothing else: no notes on how the change was made, and no assessment
+of your own. Never reuse a reviewer for a second pull request.
 
 Then use the `apply-review-findings` skill with the pull request, the
 reviewer's findings and its patch. It checks each finding against the
@@ -58,9 +74,9 @@ commits and pushes. In a stack, review the next pull request only after the
 one below is amended and synced: the amend changes what the next reviewer
 must see.
 
-A reviewer that cannot be spawned, or cannot run `/code-review`, is a
-missing capability: report it rather than reviewing by hand, and leave
-the pull requests as drafts.
+A reviewer that cannot be spawned, or in Claude Code cannot run
+`/code-review`, is a missing capability: report it rather than reviewing
+by hand, and leave the pull requests as drafts.
 
 ## 3. Ask about held findings
 
@@ -94,7 +110,7 @@ Do not merge: merging is the user's call, after their own test.
 ## Stop conditions
 
 - Everything `implement-issue` stops for.
-- A reviewer cannot be spawned or cannot run `/code-review` → report it;
-  the pull requests stay drafts.
+- A reviewer cannot be spawned, or in Claude Code cannot run
+  `/code-review` → report it; the pull requests stay drafts.
 - A held finding is undecided → that pull request stays a draft.
 - CI stays red after one fix → report it with the output.

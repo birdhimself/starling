@@ -265,6 +265,16 @@ Starling works in repositories on GitHub and on Forgejo.
   merged and sets the bases, since Forgejo does not move a pull request
   off a merged base by itself. `stack merge` fails there: the pull
   requests merge one at a time.
+- **Reviews in Antigravity CLI.** `ship-issue` keeps its independent
+  review there: the reviewer is a subagent with a fresh context
+  (`invoke_subagent`), in a worktree that the orchestrator creates with
+  `git worktree add`, so that it depends on no workspace feature of the
+  agent. Antigravity CLI has no `/code-review`, so the reviewer prompt
+  holds a short review procedure for it, with the same output. The other
+  choices were a skill that ships without review and a `ship-issue` that
+  drops the review where it cannot spawn a reviewer; both would mark pull
+  requests ready that nobody but their author read. `ship-issue-batch`
+  still needs Claude Code.
 - **Reviews take a range, not a pull request number.** The reviewers of
   `ship-issue` and `ship-issue-batch` run `/code-review` on
   `origin/<base>...<head commit>`. A number makes `/code-review` look the
