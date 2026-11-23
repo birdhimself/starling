@@ -24,8 +24,8 @@ The reasons behind all of this are in [docs/design.md](docs/design.md).
 - **Checked commit messages:** one script,
   `.starling/bin/check-commit-msg`, run by a commit-msg hook and by a CI
   workflow on ready pull requests and pushes to the default branch.
-- **A guard against skipped checks:** a Claude Code hook that stops agents
-  from bypassing the git hooks.
+- **A guard against skipped checks:** a hook for Claude Code and
+  Antigravity CLI that stops agents from bypassing the git hooks.
 - **[Skills](#skills)** for the work around issues, commits and pull
   requests, for Claude Code and Codex.
 
@@ -45,7 +45,8 @@ machine: no global git hooks path, nothing on `PATH`, nothing in
   its API cannot resolve a review thread: the skills say what they do
   instead.
 - `jq`, only to merge Starling's settings into an existing
-  `.claude/settings.json`. Without it, the installer says what to merge.
+  `.claude/settings.json` or `.agents/hooks.json`. Without it, the
+  installer says what to merge.
 
 Forgejo support is experimental. It was tested against one Forgejo
 version, command by command, and no agent has yet taken an issue to a
@@ -73,6 +74,7 @@ Besides `.starling/`, the installer sets up:
 | `.claude/skills/<name>`, `.agents/skills/<name>` | A link to each of Starling's skills, for Claude Code and Codex.                 |
 | `.github/workflows/starling-commits.yml`         | The CI check of every commit. On Forgejo, in `.forgejo/workflows/`.             |
 | `.claude/settings.json`                          | The Claude Code hooks, and Claude Code's own commit and pull request lines off. |
+| `.agents/hooks.json`                             | The same hooks for Antigravity CLI, as the hook set named `starling`.           |
 | `.prettierignore`                                | `.starling/`, in a project that uses Prettier.                                  |
 | `core.hooksPath` in the clone's git config       | Points to `.starling/hooks`, unless another tool already set it.                |
 
@@ -111,7 +113,8 @@ once:
 .starling/bin/activate-hooks
 ```
 
-Claude Code does this at the start of every session. For everyone else, a
+Claude Code and Antigravity CLI do this at the start of every session. For
+everyone else, a
 dev container's `postCreateCommand` can run it, or a Node `prepare` script:
 
 ```sh

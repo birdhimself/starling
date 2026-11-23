@@ -1,0 +1,21 @@
+{
+  "starling": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "../.starling/bin/activate-hooks || true"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "../.starling/bin/deny-hook-bypass"
+          }
+        ]
+      }
+    ]
+  }
+}
