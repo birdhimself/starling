@@ -176,8 +176,10 @@ done
 echo "Instructions:"
 git ls-files -co --exclude-standard -- AGENTS.md '*/AGENTS.md' CLAUDE.md '*/CLAUDE.md' |
 	grep -v '^\.starling/' | sed 's/^/  /'
-if [ -f AGENTS.md ] && grep -q '@\.starling/AGENTS\.md$' AGENTS.md; then
+if [ -f AGENTS.md ] && grep -q '@\.starling/AGENTS\.md @\[Starling\](\.starling/AGENTS\.md)$' AGENTS.md; then
 	echo "  AGENTS.md imports the shared rules"
+elif [ -f AGENTS.md ] && grep -q '@\.starling/AGENTS\.md$' AGENTS.md; then
+	echo "  AGENTS.md imports the shared rules for Claude Code only; the installer adds Antigravity CLI's form to the line"
 else
 	echo "  AGENTS.md does not import the shared rules; the installer adds the line"
 fi

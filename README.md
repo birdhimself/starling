@@ -203,7 +203,7 @@ No skill merges a pull request.
 
 ## Agents
 
-I use Starling with Claude Code and Codex.
+I use Starling with Claude Code, Codex and Antigravity CLI (`agy`).
 
 - **Claude Code** gets all of it: the import line, the skills, and the
   settings with the hooks.
@@ -213,6 +213,9 @@ I use Starling with Claude Code and Codex.
   that matter are enforced by the git hook and CI, so a miss costs a failed
   check, not a bad commit. `ship-issue` and `ship-issue-batch` need Claude
   Code, because they use its subagents and its `/code-review`.
+- **Antigravity CLI** reads `AGENTS.md` and follows the second form of the
+  import on the import line, `@[Starling](.starling/AGENTS.md)`. It finds
+  the skills in `.agents/skills` and runs the hooks in `.agents/hooks.json`.
 
 ## Working on Starling
 

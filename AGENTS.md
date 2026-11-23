@@ -5,7 +5,7 @@ across my repositories. It is installed into a repository as a `.starling/`
 folder.
 
 This repository also follows the shared rules in Starling; read them
-before starting any task: @.starling/AGENTS.md
+before starting any task: @.starling/AGENTS.md @[Starling](.starling/AGENTS.md)
 
 `README.md` explains how to use Starling, and `docs/design.md` what was
 decided and why. Read `docs/design.md` before changing how Starling works.

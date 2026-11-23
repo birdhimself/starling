@@ -138,12 +138,21 @@ installer does not create it; a project adds it when it needs a setting.
 ## Shared instructions: one import line
 
 The project's `AGENTS.md` gets one line near the top, written once at
-install and never touched by updates:
+install:
 
 ```md
-This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md
+This repository also follows the shared rules in Starling; read them before starting any task: @.starling/AGENTS.md @[Starling](.starling/AGENTS.md)
 ```
 
+- It imports the file in two forms, because no form works for both agents
+  that resolve imports: Claude Code imports `@path` and leaves the
+  Markdown link alone, and Antigravity CLI imports `@[text](path)` and
+  leaves `@path` alone (see Verified facts). One line with both works in
+  each.
+- Updates leave the line alone, with one exception: a line of an earlier
+  version, which ends in `@.starling/AGENTS.md`, gets the link appended,
+  wrapped or not. Without that, no repository installed before Antigravity
+  CLI was supported would load the rules there.
 - Claude Code resolves `@path` imports in `AGENTS.md`. The path must not be
   in backticks: imports inside code spans are not resolved. It must end the
   line or be followed by a space: in `@.starling/AGENTS.md.` the period
@@ -152,6 +161,9 @@ This repository also follows the shared rules in Starling; read them before star
 - The installer writes it as one line because projects wrap differently.
   Wrapped, with the path ending the last line, the import works too;
   Starling's own `AGENTS.md` wraps it that way.
+- Antigravity CLI reads `AGENTS.md` and resolves the Markdown link after
+  `@`, relative to the file. Without it, the sentence alone made it read
+  the file in 2 of 3 runs.
 - Codex does not resolve imports. The sentence asks it to read the file,
   which it does most of the time but not always (see Verified facts). Rules
   that matter are enforced by checks, so a miss costs a failed check, not a
@@ -638,6 +650,13 @@ Checked on 2026-11-23 with Antigravity CLI 1.5.15 and Claude Code 2.1.330.
 - Its shell tool is `run_command`, with the command in
   `toolCall.args.CommandLine`. A `PreToolUse` hook that exits 2 blocks the
   tool, and its standard error reaches the model.
+- Of a line that ends in `@.starling/AGENTS.md`, in
+  `@[Starling](.starling/AGENTS.md)` or in both, separated by a space:
+  Claude Code imports the file from the first and the third, Antigravity
+  CLI from the second and the third. Each was asked to quote a rule without
+  tools.
+- Claude Code loads no project instructions in a folder it has not been
+  told to trust, so a test of an import there finds nothing.
 - Antigravity CLI finds skills in `.agents/skills/<name>/SKILL.md`, has
   subagents with a fresh context (`invoke_subagent`), and has no code
   review command.
